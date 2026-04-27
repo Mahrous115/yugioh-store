@@ -1,7 +1,7 @@
 # Duel Market — Yu-Gi-Oh! E-Commerce Demo
 
 > A full-stack portfolio project showcasing React, FastAPI, Supabase, and third-party API integration.  
-> **Live demo:** _[Add your Vercel URL here]_
+> **Live demo:** [https://project-4yktn.vercel.app](https://project-4yktn.vercel.app)
 
 ---
 
