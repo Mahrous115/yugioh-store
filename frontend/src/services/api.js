@@ -8,10 +8,10 @@ async function authHeaders() {
   return session ? { Authorization: `Bearer ${session.access_token}` } : {}
 }
 
-async function request(path, options = {}) {
+async function request(path, { headers: extraHeaders = {}, ...rest } = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    ...rest,
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
