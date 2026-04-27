@@ -34,7 +34,7 @@ export async function createListing(data) {
 }
 
 export async function updateListing(id, data) {
-  return request(`/api/listings/${id}`, {
+  return request(`/api/listings/${id}/`, {
     method: 'PUT',
     headers: await authHeaders(),
     body: JSON.stringify(data),
@@ -42,7 +42,7 @@ export async function updateListing(id, data) {
 }
 
 export async function deleteListing(id) {
-  return request(`/api/listings/${id}`, {
+  return request(`/api/listings/${id}/`, {
     method: 'DELETE',
     headers: await authHeaders(),
   })
@@ -63,7 +63,7 @@ export async function addToWishlist(item) {
 }
 
 export async function removeFromWishlist(cardId) {
-  return request(`/api/wishlist/${cardId}`, {
+  return request(`/api/wishlist/${cardId}/`, {
     method: 'DELETE',
     headers: await authHeaders(),
   })
