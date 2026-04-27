@@ -19,14 +19,6 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
-    // Bootstrap: check for an existing session (e.g. page refresh)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      setLoading(false)
-    })
-
-    // Keep state in sync with Supabase Auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null)
@@ -35,6 +27,7 @@ export function AuthProvider({ children }) {
         } else {
           setProfile(null)
         }
+        setLoading(false)
       }
     )
 
