@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { searchCards } from '../services/ygoprodeck'
 import { getListings } from '../services/api'
 import CardGrid from '../components/CardGrid'
+import { useAuth } from '../context/AuthContext'
 
 const FEATURED_SEARCH = 'dragon'
 
 export default function Home() {
+  const { user } = useAuth()
   const [cards,      setCards]      = useState([])
   const [listingMap, setListingMap] = useState(new Map())
   const [loading,    setLoading]    = useState(true)
@@ -40,7 +42,10 @@ export default function Home() {
           </p>
           <div className="hero__cta">
             <Link to="/catalog" className="btn btn--gold btn--lg">Browse Catalog</Link>
-            <Link to="/register" className="btn btn--outline btn--lg">Create Account</Link>
+            {user
+              ? <Link to="/catalog" className="btn btn--outline btn--lg">Go to Catalog</Link>
+              : <Link to="/register" className="btn btn--outline btn--lg">Create Account</Link>
+            }
           </div>
         </div>
         <div className="hero__decoration" aria-hidden="true">★</div>
