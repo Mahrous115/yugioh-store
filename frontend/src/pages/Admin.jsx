@@ -1,9 +1,33 @@
 import { useEffect, useState } from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+} from 'recharts'
 import { getListings, createListing, updateListing, deleteListing } from '../services/api'
 import { searchCards } from '../services/ygoprodeck'
+import { supabase } from '../services/supabase'
 import LoadingSpinner from '../components/LoadingSpinner'
 
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{
+      background: 'var(--bg-3)',
+      border: '1px solid var(--border-gold)',
+      borderRadius: 'var(--radius-sm)',
+      padding: '0.5rem 0.75rem',
+    }}>
+      <p style={{ color: 'var(--text-2)', margin: '0 0 0.25rem', fontSize: '0.8rem' }}>{label}</p>
+      <p style={{ color: 'var(--gold)', margin: 0, fontWeight: 600 }}>${payload[0].value.toFixed(2)}</p>
+    </div>
+  )
+}
+
 export default function Admin() {
+  // ── Analytics state ───────────────────────────────────────
+  const [analytics,        setAnalytics]        = useState(null)
+  const [loadingAnalytics, setLoadingAnalytics] = useState(true)
+
+  // ── Listings state ────────────────────────────────────────
   const [listings,    setListings]    = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [editingId,   setEditingId]   = useState(null)
@@ -20,7 +44,51 @@ export default function Admin() {
   const [newStock,     setNewStock]     = useState('')
   const [adding,       setAdding]       = useState(false)
 
-  useEffect(() => { loadListings() }, [])
+  useEffect(() => { loadListings() },  [])
+  useEffect(() => { loadAnalytics() }, [])
+
+  async function loadAnalytics() {
+    try {
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('total, items, created_at')
+        .order('created_at', { ascending: true })
+
+      const rows = orders ?? []
+
+      const totalOrders  = rows.length
+      const totalRevenue = rows.reduce((sum, o) => sum + parseFloat(o.total), 0)
+
+      // Aggregate quantity sold per card across all orders
+      const productMap = {}
+      for (const order of rows) {
+        const items = Array.isArray(order.items) ? order.items : []
+        for (const item of items) {
+          const name = item.card_name
+          productMap[name] = (productMap[name] || 0) + (item.quantity || 1)
+        }
+      }
+      const topProducts = Object.entries(productMap)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+        .map(([name, qty]) => ({ name, qty }))
+
+      // Daily revenue for the chart
+      const revenueByDate = {}
+      for (const order of rows) {
+        const date = order.created_at.slice(0, 10)
+        revenueByDate[date] = (revenueByDate[date] || 0) + parseFloat(order.total)
+      }
+      const revenueChart = Object.entries(revenueByDate)
+        .map(([date, revenue]) => ({ date, revenue: +revenue.toFixed(2) }))
+
+      setAnalytics({ totalOrders, totalRevenue, topProducts, revenueChart })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoadingAnalytics(false)
+    }
+  }
 
   async function loadListings() {
     setLoadingList(true)
@@ -91,6 +159,95 @@ export default function Admin() {
 
       {error   && <div className="alert alert--error">{error}</div>}
       {success && <div className="alert alert--success">{success}</div>}
+
+      {/* ── Analytics ─────────────────────────────────────────── */}
+      <section className="admin-section">
+        <h2 className="admin-section__title">Analytics</h2>
+
+        {loadingAnalytics ? <LoadingSpinner /> : analytics && (
+          <>
+            {/* Stat cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '1rem',
+              marginBottom: '2rem',
+            }}>
+              {[
+                { label: 'Total Orders',  value: analytics.totalOrders },
+                { label: 'Total Revenue', value: `$${analytics.totalRevenue.toFixed(2)}` },
+              ].map(({ label, value }) => (
+                <div key={label} style={{
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  padding: '1.25rem 1.5rem',
+                }}>
+                  <p style={{ color: 'var(--text-2)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 0.4rem' }}>
+                    {label}
+                  </p>
+                  <p style={{ color: 'var(--gold)', fontSize: '1.9rem', fontWeight: 700, margin: 0 }}>
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Top 5 products */}
+            <h3 style={{ color: 'var(--text-1)', fontSize: '0.95rem', fontWeight: 600, margin: '0 0 0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Top 5 Products
+            </h3>
+            {analytics.topProducts.length === 0 ? (
+              <p className="text-muted" style={{ marginBottom: '2rem' }}>No order data yet.</p>
+            ) : (
+              <div className="admin-table-wrap" style={{ marginBottom: '2rem' }}>
+                <table className="admin-table">
+                  <thead>
+                    <tr><th>#</th><th>Card</th><th>Qty Sold</th></tr>
+                  </thead>
+                  <tbody>
+                    {analytics.topProducts.map(({ name, qty }, i) => (
+                      <tr key={name}>
+                        <td style={{ color: 'var(--text-3)', width: '2.5rem' }}>{i + 1}</td>
+                        <td>{name}</td>
+                        <td style={{ color: 'var(--gold)', fontWeight: 600 }}>{qty}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Revenue over time */}
+            <h3 style={{ color: 'var(--text-1)', fontSize: '0.95rem', fontWeight: 600, margin: '0 0 0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Revenue Over Time
+            </h3>
+            {analytics.revenueChart.length === 0 ? (
+              <p className="text-muted">No order data yet.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={analytics.revenueChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: 'var(--text-2)', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: 'var(--text-2)', fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={v => `$${v}`}
+                    width={54}
+                  />
+                  <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(201,162,39,0.08)' }} />
+                  <Bar dataKey="revenue" fill="var(--gold)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </>
+        )}
+      </section>
 
       {/* ── Add new listing ─────────────────────────────────── */}
       <section className="admin-section">
