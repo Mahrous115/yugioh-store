@@ -23,12 +23,16 @@ export default function CardDetail() {
     async function load() {
       setLoading(true)
       try {
-        const [cardData, listings] = await Promise.all([
-          getCardById(id),
-          getListings(),
-        ])
+        const cardData = await getCardById(id)
         setCard(cardData)
-        setListing(listings.find(l => l.card_id === cardData.id) ?? null)
+        // Fetch listing independently so a backend failure doesn't
+        // prevent the card detail page from rendering.
+        try {
+          const listings = await getListings()
+          setListing(listings.find(l => l.card_id === cardData.id) ?? null)
+        } catch {
+          setListing(null)
+        }
       } catch (e) {
         setError(e.message)
       } finally {
