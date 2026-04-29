@@ -1,7 +1,8 @@
 """FastAPI application entry point."""
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 
 from routers import listings, wishlist, orders
@@ -13,6 +14,16 @@ app = FastAPI(
     description="Backend for the YGO e-commerce demo. Card data comes from YGOPRODeck.",
     version="1.0.0",
 )
+
+# Prevent Railway's Fastly CDN from caching any API responses
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return response
+
+app.add_middleware(NoCacheMiddleware)
 
 # Allow requests from the frontend (configure FRONTEND_URL in .env for production)
 app.add_middleware(
