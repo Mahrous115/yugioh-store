@@ -1,5 +1,4 @@
 """FastAPI application entry point."""
-import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -25,14 +24,13 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(NoCacheMiddleware)
 
-# Allow requests from the frontend (configure FRONTEND_URL in .env for production)
+# Demo project — allow all origins so Vercel preview URLs are never blocked.
+# allow_credentials must be False when allow_origins=["*"] (CORS spec).
+# Auth is handled via Bearer token in the Authorization header, not cookies.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:5173"),
-        "http://localhost:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
