@@ -1,7 +1,10 @@
 """JWT verification helpers for FastAPI dependency injection."""
+import logging
 from fastapi import HTTPException, Depends, Header
 from typing import Optional
 from services.supabase_client import supabase
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_user(authorization: Optional[str] = Header(None)):
@@ -18,18 +21,28 @@ def get_current_user(authorization: Optional[str] = Header(None)):
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error("get_user failed: %s", exc)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 def get_admin_user(user=Depends(get_current_user)):
     """Extend get_current_user: also assert the user has role='admin' in profiles."""
-    result = (
-        supabase.table("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single()
-        .execute()
-    )
-    if not result.data or result.data.get("role") != "admin":
+    try:
+        # Use .limit(1) instead of .single() — .single() raises when 0 rows are
+        # found (PostgREST returns 404/406) and that exception escapes as a 404.
+        result = (
+            supabase.table("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .limit(1)
+            .execute()
+        )
+        role = result.data[0].get("role") if result.data else None
+    except Exception as exc:
+        logger.error("profiles role check failed for user %s: %s (%r)", user.id, exc, exc)
+        raise HTTPException(status_code=403, detail="Admin access required") from exc
+
+    logger.debug("admin check: user=%s role=%s", user.id, role)
+    if role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
