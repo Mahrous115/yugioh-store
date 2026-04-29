@@ -5,10 +5,18 @@ const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 async function authHeaders() {
   const { data: { session } } = await supabase.auth.getSession()
+  if (session) {
+    console.log('[api] auth token present, user:', session.user?.email,
+      '| token prefix:', session.access_token?.slice(0, 20) + '…')
+  } else {
+    console.warn('[api] no active session — Authorization header will be omitted')
+  }
   return session ? { Authorization: `Bearer ${session.access_token}` } : {}
 }
 
 async function request(path, { headers: extraHeaders = {}, ...rest } = {}) {
+  const hasAuth = 'Authorization' in extraHeaders
+  console.log(`[api] ${(rest.method || 'GET').padEnd(6)} ${path} | auth: ${hasAuth}`)
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...extraHeaders },
     ...rest,
