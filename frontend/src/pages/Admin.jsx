@@ -130,8 +130,10 @@ export default function Admin() {
       setSuccess(`Listing for "${selectedCard.name}" created.`)
       setSelectedCard(null); setQuery(''); setNewPrice(''); setNewStock('')
       loadListings()
-    } catch (e) { setError(e.message) }
-    finally { setAdding(false) }
+    } catch (e) {
+      console.error('[Admin] createListing failed:', e)
+      setError(e.message || 'Failed to create listing')
+    } finally { setAdding(false) }
   }
 
   async function handleSaveEdit(id) {
