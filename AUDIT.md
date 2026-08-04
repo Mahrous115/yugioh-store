@@ -28,28 +28,28 @@ layer itself was sound: no IDOR, `user_id` never taken from a request body.
 | **C2** | Order totals and prices trusted from the request body | `d7a8c2b` |
 | **H1** | Browser writes orders straight to Postgres, bypassing the API | `d7a8c2b` |
 | **M1** | Wildcard CORS | `ef20a21` |
+| **M3** | Auth failures leak internal error strings | `b11cd24` |
+| **M4** | `/docs`, `/redoc`, `/openapi.json` public | `4cd7c62` |
+| **M5** | No security headers, no CSP | `f433e48` |
+| **H2** | No rate limiting anywhere | `2b84f0b` |
+| **L8** | Stock never decremented; no transaction | `2027437` |
 | **L11** | `schema.sql` drifted from the deployed database | `c679c18` |
 | **M2** | — retracted; the finding was wrong (see below) | n/a |
 
 Verified by re-running the original, unmodified `part2.py` probe script:
-**6 VULN → 0 VULN**, and by a 38-test integration suite in `backend/tests/`, written
-test-first so each fix was seen to fail before it passed.
+**6 VULN → 0 VULN**, and by a **115-test integration suite** in `backend/tests/`, written
+test-first so every fix was seen to fail before it passed.
 
 ### What remains open
 
-| ID | Finding | Severity |
-|---|---|---|
-| **H2** | No rate limiting anywhere | HIGH |
-| **H3** | Tokens in `localStorage`; XSS ⇒ persistent account takeover | HIGH |
-| **M3** | Auth failures leak internal error strings | MEDIUM |
-| **M4** | `/docs`, `/redoc`, `/openapi.json` public | MEDIUM |
-| **M5** | No security headers, no CSP | MEDIUM |
-| **M6** | Auth costs a network round-trip per request | MEDIUM |
-| **L1–L10** | Assorted cleanup — see the LOW section | LOW |
+| ID | Finding | Severity | Why it is still open |
+|---|---|---|---|
+| **H3** | Tokens in `localStorage`; XSS ⇒ persistent account takeover | HIGH | Design-level. The "any origin" half closed with **M1**; the storage half needs a change to how sessions are held. The **M5** CSP now materially reduces the risk. |
+| **M6** | Auth costs a network round-trip per request | MEDIUM | Design-level. Already correct security-wise; the cost is latency and an availability coupling. Needs local JWT verification against the project secret. |
+| **L1–L7, L9, L10** | Assorted cleanup — see the LOW section | LOW | Untidy, not exploitable. |
 
-**H3 and M6 are design-level** and are not scheduled: H3 needs a change to how sessions
-are stored (or a CSP strong enough to contain it, which **M5** partly addresses), and M6
-needs local JWT verification against the project secret instead of a call to Supabase Auth.
+Both remaining items are **deliberate, not forgotten**. Each needs a design decision rather
+than a patch, and a half-measure on either would read as protection without being any.
 
 ---
 
@@ -287,7 +287,12 @@ This is a **second, independent path to C2**. Fixing the validation in `orders.p
 ## H2. No rate limiting anywhere
 **[VERIFIED-RUNTIME]** — no limiter middleware present; confirmed absent from `main.py`
 
-> **STATUS: OPEN**
+> **STATUS: FIXED** in `2b84f0b`. slowapi, keyed per caller (hashed session token when
+> authenticated, IP otherwise) rather than globally — behind a shared IP an IP-keyed limit
+> throttles unrelated users together. Per minute: orders 5, wishlist writes 10, listings
+> writes 30, everything else 300; all env-overridable. Registered inside the header
+> middleware so a 429 still carries the M5 headers.
+> Regression tests: `backend/tests/test_h2_rate_limiting.py` (7 tests).
 
 No `slowapi`, no reverse proxy, nothing. `POST /api/orders/` and `POST /api/wishlist/` are
 unauthenticated-to-write-cost: a single valid token can insert unbounded rows into your
@@ -373,7 +378,12 @@ analytics work correctly is what upgrades **C1** from "attacker vandalises the s
 ## M3. Auth failures leak internal error strings to unauthenticated callers
 **[VERIFIED-RUNTIME]** — [auth.py:46](backend/services/auth.py#L46)
 
-> **STATUS: OPEN**
+> **STATUS: FIXED** in `b11cd24`. Every token failure returns the same fixed
+> `Invalid or expired token`; the real cause is logged server-side at WARNING with a
+> traceback. "Bad signature", "expired" and "Supabase unreachable" are deliberately
+> indistinguishable to the caller — telling them apart is the pre-auth oracle this
+> finding is about. `get_admin_user` got the same treatment.
+> Regression tests: `backend/tests/test_m3_auth_error_leakage.py` (16 tests).
 
 ```python
 raise HTTPException(status_code=401, detail=str(exc)) from exc
@@ -395,7 +405,10 @@ server logs. Debug mode is off and that part is correct.
 ## M4. Interactive API docs are public
 **[VERIFIED-RUNTIME]** — `/docs` → 200, `/redoc` → 200, `/openapi.json` → 200
 
-> **STATUS: OPEN**
+> **STATUS: FIXED** in `4cd7c62`. All three are gated on `ENABLE_DOCS`, and only an
+> affirmative value opens them — unset, empty, `false`, `0` and `no` all leave them
+> shut, so a half-set variable fails closed.
+> Regression tests: `backend/tests/test_m4_docs_exposure.py` (20 tests).
 
 Full machine-readable map of every endpoint, parameter and schema, served to anyone. Not a
 vulnerability by itself; it is a reconnaissance accelerator, and there is no reason for it to
@@ -408,7 +421,12 @@ be reachable in production.
 The only headers the app sets are `Cache-Control: no-store` / `Pragma: no-cache`. A CSP is the
 single most valuable one missing here, because it is the mitigation that would contain H3.
 
-> **STATUS: OPEN**
+> **STATUS: FIXED** in `f433e48`. Adds HSTS, `X-Frame-Options: DENY`, `nosniff`,
+> `Referrer-Policy: no-referrer` and a CSP of `default-src 'none'` with `frame-ancestors`,
+> `base-uri` and `form-action` all `'none'` — this service returns JSON only, so it can
+> afford the strictest policy there is. Swagger UI gets a policy relaxed exactly as far as
+> it needs and no further. Headers are asserted on 200, 401, 404 and 429 alike.
+> Regression tests: `backend/tests/test_m5_security_headers.py` (24 tests).
 
 ## M6. Every authenticated request makes a network round-trip to Supabase
 **[VERIFIED-STATIC]** — [auth.py:19](backend/services/auth.py#L19)
@@ -479,7 +497,14 @@ A malformed id produces a driver-level error surfacing as 500 rather than a clea
 **L8. Stock is decorative.** `listings.stock` is displayed and gates the Add-to-Cart button
 client-side, but placing an order never decrements it. Orders are also written with no
 transaction spanning the stock check, so even a correct implementation would race.
-**STATUS: OPEN**
+
+> **STATUS: FIXED** in `2027437` (+ `migrations/003_l8_transactional_stock.sql`).
+> Pricing, stock reservation and the insert moved into `public.place_order`, whose plpgsql
+> body is a single transaction: `SELECT ... FOR UPDATE` serialises buyers of the same
+> listing, and any failure rolls back every decrement in the call. Over-ordering is 409;
+> "not listed" stays 400. The race was demonstrated failing first — four concurrent buyers
+> all got the last 2 units.
+> Regression tests: `backend/tests/test_l8_stock.py` (10 tests).
 
 **L9. Dead code from the Railway era.** `NoCacheMiddleware` ([main.py:18-25](backend/main.py#L18-L25))
 exists solely to defeat Railway's Fastly CDN, which no longer exists; it now just suppresses
