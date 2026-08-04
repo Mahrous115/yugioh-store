@@ -562,6 +562,17 @@ button { cursor: pointer; font-family: inherit; }
 .cart-item__name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cart-item__price { font-size: 13px; color: var(--text-2); }
 
+/* Stock state on a cart line — set from the shared listings, so it stays
+   accurate after someone else's purchase moves the numbers. */
+.cart-item__stock {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 2px 0 0;
+}
+.cart-item__stock--warn { color: var(--warning); font-weight: 600; }
+
+.qty-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
 .cart-item__qty  { display: flex; align-items: center; gap: 10px; }
 .qty-btn         { width: 28px; height: 28px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-1); font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all var(--transition); }
 .qty-btn:hover   { border-color: var(--gold); color: var(--gold); }

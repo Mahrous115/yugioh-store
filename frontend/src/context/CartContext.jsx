@@ -32,6 +32,18 @@ function reducer(state, action) {
         ),
       }
 
+    // Re-price the cart from the shop's current listings. Cart lines cache the
+    // price from when they were added, and the server rejects an order whose
+    // total disagrees with the catalogue — so after that rejection the cart has
+    // to be brought back in line before retrying is anything but a loop.
+    case 'SYNC_PRICES':
+      return {
+        items: state.items.map(i => {
+          const listing = action.byCardId.get(i.card_id)
+          return listing ? { ...i, price: listing.price } : i
+        }),
+      }
+
     case 'CLEAR':
       return { items: [] }
 
@@ -62,6 +74,7 @@ export function CartProvider({ children }) {
   const removeFromCart = card_id   => dispatch({ type: 'REMOVE',  card_id })
   const setQuantity   = (card_id, quantity) => dispatch({ type: 'SET_QTY', card_id, quantity })
   const clearCart     = ()          => dispatch({ type: 'CLEAR' })
+  const syncPrices    = byCardId    => dispatch({ type: 'SYNC_PRICES', byCardId })
 
   const itemCount = state.items.reduce((s, i) => s + i.quantity, 0)
   const total     = state.items.reduce((s, i) => s + i.price * i.quantity, 0)
@@ -75,6 +88,7 @@ export function CartProvider({ children }) {
       removeFromCart,
       setQuantity,
       clearCart,
+      syncPrices,
     }}>
       {children}
     </CartContext.Provider>

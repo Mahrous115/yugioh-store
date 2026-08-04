@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { searchCards, loadDefaultCatalog } from '../services/ygoprodeck'
-import { getListings } from '../services/api'
+import { useListings } from '../context/ListingsContext'
 import FilterBar from '../components/FilterBar'
 import CardGrid from '../components/CardGrid'
 
@@ -8,16 +8,15 @@ const PAGE_SIZE = 20
 
 export default function Catalog() {
   const [cards,      setCards]      = useState([])
-  const [listingMap, setListingMap] = useState(new Map())
   const [loading,    setLoading]    = useState(true)
   const [total,      setTotal]      = useState(0)
   const [offset,     setOffset]     = useState(0)
   const [filters,    setFilters]    = useState({ fname: '', type: '', attribute: '', race: '' })
 
-  // Load custom listings once (they don't change during a session)
-  useEffect(() => {
-    getListings().then(list => setListingMap(new Map(list.map(l => [l.card_id, l]))))
-  }, [])
+  // Listings come from the shared store rather than a local fetch. They used to be
+  // loaded once here, on the assumption that they never change during a session --
+  // no longer true now that a purchase decrements stock.
+  const { byCardId: listingMap } = useListings()
 
   const fetchCards = useCallback(async (currentFilters, currentOffset) => {
     setLoading(true)

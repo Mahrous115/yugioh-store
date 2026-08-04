@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { getCardById } from '../services/ygoprodeck'
-import { getListings } from '../services/api'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
+import { useListings } from '../context/ListingsContext'
 import { useWishlist } from '../hooks/useWishlist'
 import LoadingSpinner from '../components/LoadingSpinner'
 
@@ -14,25 +14,20 @@ export default function CardDetail() {
   const { isWishlisted, toggle } = useWishlist()
 
   const [card,    setCard]    = useState(null)
-  const [listing, setListing] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [added,   setAdded]   = useState(false)
+
+  // Read from the shared store rather than fetching a private copy: this page
+  // shows stock, and stock now moves when anyone checks out.
+  const { byCardId } = useListings()
+  const listing = card ? (byCardId.get(card.id) ?? null) : null
 
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const cardData = await getCardById(id)
-        setCard(cardData)
-        // Fetch listing independently so a backend failure doesn't
-        // prevent the card detail page from rendering.
-        try {
-          const listings = await getListings()
-          setListing(listings.find(l => l.card_id === cardData.id) ?? null)
-        } catch {
-          setListing(null)
-        }
+        setCard(await getCardById(id))
       } catch (e) {
         setError(e.message)
       } finally {

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider }     from './context/AuthContext'
 import { CartProvider }     from './context/CartContext'
 import { WishlistProvider } from './context/WishlistContext'
+import { ListingsProvider } from './context/ListingsContext'
 import App from './App'
 import './index.css'
 
@@ -12,11 +13,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       {/* Auth must wrap Wishlist because WishlistProvider reads the current user */}
       <AuthProvider>
-        <CartProvider>
-          <WishlistProvider>
-            <App />
-          </WishlistProvider>
-        </CartProvider>
+        {/* Listings wraps Cart so checkout can refresh stock after an order */}
+        <ListingsProvider>
+          <CartProvider>
+            <WishlistProvider>
+              <App />
+            </WishlistProvider>
+          </CartProvider>
+        </ListingsProvider>
       </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
