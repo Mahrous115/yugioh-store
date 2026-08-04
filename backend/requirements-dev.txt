@@ -1,0 +1,9 @@
+# Test-only dependencies. Install with:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# The suite is an integration suite: it runs against the real Supabase project and a
+# locally running backend, because there is no Docker here and no local Supabase Auth.
+# It creates throwaway users and deletes them on teardown.
+pytest
+psycopg[binary]   # direct Postgres access, for asserting on RLS policies and grants
+httpx             # already a supabase transitive dep; named explicitly for test use
