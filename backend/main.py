@@ -11,10 +11,21 @@ from routers import listings, wishlist, orders
 
 load_dotenv()
 
+# Interactive docs publish a complete map of every endpoint, parameter and model.
+# Useful locally, pure reconnaissance value in production, so they are off unless
+# explicitly switched on (AUDIT.md M4). Only an affirmative value opens them --
+# unset, empty, "false", "0" and "no" all leave them shut.
+ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
+
 app = FastAPI(
     title="Yu-Gi-Oh! Duel Market API",
     description="Backend for the YGO e-commerce demo. Card data comes from YGOPRODeck.",
     version="1.0.0",
+    docs_url="/docs" if ENABLE_DOCS else None,
+    redoc_url="/redoc" if ENABLE_DOCS else None,
+    # Closing this alone would disable /docs and /redoc too, since they fetch it;
+    # all three are set explicitly so the intent survives someone editing one.
+    openapi_url="/openapi.json" if ENABLE_DOCS else None,
 )
 
 # Prevent Railway's Fastly CDN from caching any API responses
