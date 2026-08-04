@@ -1,10 +1,11 @@
 """Orders router — all endpoints require authentication."""
 from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from models.order import OrderCreate
 from services.auth import get_current_user
+from services.rate_limit import ORDER_LIMIT, limiter
 from services.supabase_client import supabase
 
 router = APIRouter()
@@ -31,7 +32,8 @@ def get_orders(user=Depends(get_current_user)):
 
 
 @router.post("/", status_code=201)
-def create_order(order: OrderCreate, user=Depends(get_current_user)):
+@limiter.limit(ORDER_LIMIT)  # tightest budget in the app: every call creates a row
+def create_order(request: Request, order: OrderCreate, user=Depends(get_current_user)):
     """Persist a mock checkout order, priced from the catalogue.
 
     Nothing about the money comes from the request body. Each card_id is looked

@@ -4,10 +4,13 @@ import re
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 
 from routers import listings, wishlist, orders
+from services.rate_limit import limiter, rate_limit_exceeded_handler
 
 load_dotenv()
 
@@ -78,6 +81,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         return response
 
+
+# ─── Rate limiting ───────────────────────────────────────────────────────────
+#
+# Registered BEFORE SecurityHeadersMiddleware on purpose. Starlette applies the
+# last-added middleware outermost, so adding the limiter first leaves it inside the
+# header middleware -- which means a 429 generated here still travels back out
+# through it and carries the security headers (AUDIT.md M5).
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(SecurityHeadersMiddleware)
 

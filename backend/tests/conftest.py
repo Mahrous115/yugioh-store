@@ -29,6 +29,11 @@ API_URL = os.environ.get("API_URL", "http://127.0.0.1:8000")
 
 TEST_PASSWORD = "TestPassword123!"
 
+# Mirrors the limits configured in main.py. Kept here so the rate-limit tests state
+# what they expect rather than hardcoding numbers in assertions.
+ORDER_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_ORDERS_PER_MIN", "5"))
+WISHLIST_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_WISHLIST_PER_MIN", "10"))
+
 
 @pytest.fixture(scope="session")
 def api():
