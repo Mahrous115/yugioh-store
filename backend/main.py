@@ -28,15 +28,58 @@ app = FastAPI(
     openapi_url="/openapi.json" if ENABLE_DOCS else None,
 )
 
-# Prevent Railway's Fastly CDN from caching any API responses
-class NoCacheMiddleware(BaseHTTPMiddleware):
+# This service answers with JSON, never HTML, so it can afford the strictest CSP
+# there is. That matters beyond tidiness: a CSP is the mitigation that contains an
+# XSS, and session tokens live in localStorage (AUDIT.md H3).
+API_CSP = (
+    "default-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'"
+)
+
+# Swagger UI is HTML with inline styles and CDN assets, so deny-all would render a
+# blank page. Relaxed only as far as it needs to be, and still unframeable.
+DOCS_CSP = (
+    "default-src 'self'; "
+    "img-src 'self' data: https://fastapi.tiangolo.com; "
+    "script-src 'self' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'"
+)
+
+DOCS_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Baseline security headers on every response, including errors.
+
+    Also carries the Cache-Control/Pragma pair that used to live in
+    NoCacheMiddleware. That was added to defeat Railway's Fastly CDN, which is gone,
+    but no-store is still the right default for authenticated JSON.
+    """
+
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        # Ignored by browsers over plain http, so it costs nothing locally and is
+        # correct the moment this is served over TLS.
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        response.headers["Content-Security-Policy"] = (
+            DOCS_CSP if request.url.path in DOCS_PATHS else API_CSP
+        )
         return response
 
-app.add_middleware(NoCacheMiddleware)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # ─── CORS ────────────────────────────────────────────────────────────────────
 #
