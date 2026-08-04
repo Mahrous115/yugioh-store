@@ -155,10 +155,54 @@ def promote():
 
 @pytest.fixture(scope="session")
 def listings(api):
-    """The live catalogue; several tests need a real card_id and price."""
+    """The live catalogue, READ ONLY.
+
+    Use this only for tests that do not buy anything. Purchases decrement stock
+    (see migration 003), so ordering against these rows drains the real shop --
+    it silently took Dark Magician Girl from 5 to 0 before `temp_listing` existed.
+    Anything that places an order should use `temp_listing` instead.
+    """
     r = httpx.get(f"{api}/api/listings/", timeout=30)
     r.raise_for_status()
     data = r.json()
     if not data:
         pytest.skip("no listings in the catalogue to test against")
     return data
+
+
+@pytest.fixture
+def temp_listing():
+    """Create disposable listings with controllable stock, removed on teardown.
+
+    Buying from these leaves the real catalogue untouched, and lets a test pick a
+    stock level rather than depending on whatever the shop happens to hold.
+    """
+    created = []
+
+    def _make(stock=1000, price=3.50):
+        card_id = 800_000_000 + uuid.uuid4().int % 10_000_000
+        r = httpx.post(
+            f"{SUPABASE_URL}/rest/v1/listings",
+            headers={**_service_headers(), "Prefer": "return=representation"},
+            json={
+                "card_id": card_id,
+                "card_name": f"PYTEST Card {card_id}",
+                "card_image": "https://example.invalid/card.jpg",
+                "price": price,
+                "stock": stock,
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        row = r.json()[0]
+        created.append(row["id"])
+        return row
+
+    yield _make
+
+    for listing_id in created:
+        httpx.delete(
+            f"{SUPABASE_URL}/rest/v1/listings?id=eq.{listing_id}",
+            headers=_service_headers(),
+            timeout=30,
+        )

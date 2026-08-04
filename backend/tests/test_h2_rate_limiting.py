@@ -14,6 +14,12 @@ import pytest
 from conftest import ORDER_LIMIT_PER_MIN, WISHLIST_LIMIT_PER_MIN
 
 
+@pytest.fixture
+def listing(temp_listing):
+    """Disposable and deeply stocked: these tests place many orders on purpose."""
+    return temp_listing(stock=1000)
+
+
 def _order_payload(listing):
     return {"items": [{"card_id": listing["card_id"], "quantity": 1}]}
 
@@ -33,9 +39,8 @@ def _hammer(fn, attempts):
 
 # ── Order creation: the tightest limit ───────────────────────────────────────
 
-def test_order_creation_is_rate_limited(api, make_user, listings):
+def test_order_creation_is_rate_limited(api, make_user, listing):
     user = make_user()
-    listing = listings[0]
     codes = _hammer(
         lambda i: httpx.post(
             f"{api}/api/orders/", headers=user.api_headers,
@@ -67,9 +72,8 @@ def test_wishlist_writes_are_rate_limited(api, make_user):
 
 # ── Shape of the rejection ───────────────────────────────────────────────────
 
-def test_429_is_well_formed(api, make_user, listings):
+def test_429_is_well_formed(api, make_user, listing):
     user = make_user()
-    listing = listings[0]
     response = None
     for _ in range(ORDER_LIMIT_PER_MIN + 2):
         r = httpx.post(f"{api}/api/orders/", headers=user.api_headers,
@@ -87,10 +91,9 @@ def test_429_is_well_formed(api, make_user, listings):
     )
 
 
-def test_429_still_carries_security_headers(api, make_user, listings):
+def test_429_still_carries_security_headers(api, make_user, listing):
     """A throttled response is still a response (AUDIT.md M5)."""
     user = make_user()
-    listing = listings[0]
     for _ in range(ORDER_LIMIT_PER_MIN + 2):
         r = httpx.post(f"{api}/api/orders/", headers=user.api_headers,
                        json=_order_payload(listing), timeout=30)
@@ -103,11 +106,10 @@ def test_429_still_carries_security_headers(api, make_user, listings):
 
 # ── Blast radius ─────────────────────────────────────────────────────────────
 
-def test_limit_is_per_caller_not_global(api, make_user, listings):
+def test_limit_is_per_caller_not_global(api, make_user, listing):
     """One user exhausting their budget must not lock everyone else out."""
     noisy = make_user()
     quiet = make_user()
-    listing = listings[0]
 
     for _ in range(ORDER_LIMIT_PER_MIN + 2):
         httpx.post(f"{api}/api/orders/", headers=noisy.api_headers,
@@ -121,10 +123,9 @@ def test_limit_is_per_caller_not_global(api, make_user, listings):
     )
 
 
-def test_reads_survive_an_exhausted_write_budget(api, make_user, listings):
+def test_reads_survive_an_exhausted_write_budget(api, make_user, listing):
     """Throttling writes must not take order history down with it."""
     user = make_user()
-    listing = listings[0]
     for _ in range(ORDER_LIMIT_PER_MIN + 2):
         httpx.post(f"{api}/api/orders/", headers=user.api_headers,
                    json=_order_payload(listing), timeout=30)

@@ -16,6 +16,16 @@ import pytest
 from conftest import SUPABASE_URL
 
 
+@pytest.fixture
+def listing(temp_listing):
+    """A disposable, well-stocked listing.
+
+    These tests place real orders, and orders now decrement stock (migration 003),
+    so they must not shop from the live catalogue.
+    """
+    return temp_listing(stock=1000, price=5.99)
+
+
 def _item(listing, quantity=1, price=None):
     return {
         "card_id": listing["card_id"],
@@ -28,7 +38,7 @@ def _item(listing, quantity=1, price=None):
 
 # ── C2: the server must own the arithmetic ───────────────────────────────────
 
-def test_audit_exploit_999_cards_for_one_cent_is_rejected(api, make_user, listings):
+def test_audit_exploit_999_cards_for_one_cent_is_rejected(api, make_user, listing):
     """The exact request from AUDIT.md C2, which previously returned 201.
 
     Any rejection is a pass here. In practice the per-line quantity bound (max 99)
@@ -36,7 +46,6 @@ def test_audit_exploit_999_cards_for_one_cent_is_rejected(api, make_user, listin
     rather than 400 -- the point is that it no longer succeeds.
     """
     user = make_user()
-    listing = listings[0]
 
     r = httpx.post(
         f"{api}/api/orders/",
@@ -52,14 +61,13 @@ def test_audit_exploit_999_cards_for_one_cent_is_rejected(api, make_user, listin
     )
 
 
-def test_forged_cheap_total_within_quantity_bounds_is_rejected(api, make_user, listings):
+def test_forged_cheap_total_within_quantity_bounds_is_rejected(api, make_user, listing):
     """The same forgery scaled to a legal quantity, so it reaches the total check.
 
     This is the one that exercises the server-side recomputation rather than the
     input bounds, and it must be a 400 from the mismatch branch.
     """
     user = make_user()
-    listing = listings[0]
 
     r = httpx.post(
         f"{api}/api/orders/",
@@ -75,10 +83,9 @@ def test_forged_cheap_total_within_quantity_bounds_is_rejected(api, make_user, l
     )
 
 
-def test_total_is_recomputed_from_the_catalogue(api, make_user, listings):
+def test_total_is_recomputed_from_the_catalogue(api, make_user, listing):
     """Even a plausible-but-wrong total must not be stored verbatim."""
     user = make_user()
-    listing = listings[0]
     correct = round(listing["price"] * 2, 2)
 
     r = httpx.post(
@@ -99,10 +106,9 @@ def test_total_is_recomputed_from_the_catalogue(api, make_user, listings):
     assert float(r.json()["total"]) == correct
 
 
-def test_line_item_price_is_ignored_in_favour_of_the_listing(api, make_user, listings):
+def test_line_item_price_is_ignored_in_favour_of_the_listing(api, make_user, listing):
     """A tampered per-item price must not influence what is charged."""
     user = make_user()
-    listing = listings[0]
     honest = round(listing["price"] * 1, 2)
 
     r = httpx.post(
@@ -136,10 +142,9 @@ def test_unknown_card_id_is_rejected(api, make_user):
     assert r.status_code == 400, f"accepted an order for an unlisted card (HTTP {r.status_code})"
 
 
-def test_client_may_omit_total_entirely(api, make_user, listings):
+def test_client_may_omit_total_entirely(api, make_user, listing):
     """The server is authoritative, so `total` should be optional."""
     user = make_user()
-    listing = listings[0]
     r = httpx.post(
         f"{api}/api/orders/",
         headers=user.api_headers,
@@ -172,24 +177,24 @@ def test_empty_order_is_rejected(api, make_user):
 
 
 @pytest.mark.parametrize("quantity", [0, -5])
-def test_non_positive_quantity_is_rejected(api, make_user, listings, quantity):
+def test_non_positive_quantity_is_rejected(api, make_user, listing, quantity):
     user = make_user()
     r = httpx.post(
         f"{api}/api/orders/",
         headers=user.api_headers,
-        json={"items": [_item(listings[0], quantity=quantity)], "total": 1.0},
+        json={"items": [_item(listing, quantity=quantity)], "total": 1.0},
         timeout=30,
     )
     assert r.status_code == 422, f"accepted quantity={quantity} (HTTP {r.status_code})"
 
 
-def test_absurd_item_count_is_rejected(api, make_user, listings):
+def test_absurd_item_count_is_rejected(api, make_user, listing):
     """Unbounded items[] is a cheap way to bloat a free-tier database."""
     user = make_user()
     r = httpx.post(
         f"{api}/api/orders/",
         headers=user.api_headers,
-        json={"items": [_item(listings[0]) for _ in range(500)], "total": 1.0},
+        json={"items": [_item(listing) for _ in range(500)], "total": 1.0},
         timeout=30,
     )
     assert r.status_code == 422, f"accepted a 500-line order (HTTP {r.status_code})"
@@ -197,7 +202,7 @@ def test_absurd_item_count_is_rejected(api, make_user, listings):
 
 # ── H1: the backend must be the only way in ──────────────────────────────────
 
-def test_browser_cannot_insert_orders_directly(api, make_user, listings):
+def test_browser_cannot_insert_orders_directly(api, make_user, listing):
     """The second path to C2, bypassing every server-side check."""
     user = make_user()
     r = httpx.post(
@@ -216,10 +221,9 @@ def test_browser_cannot_insert_orders_directly(api, make_user, listings):
     )
 
 
-def test_users_can_still_read_their_own_orders(api, make_user, listings):
+def test_users_can_still_read_their_own_orders(api, make_user, listing):
     """Closing the INSERT path must not break order history."""
     user = make_user()
-    listing = listings[0]
     created = httpx.post(
         f"{api}/api/orders/",
         headers=user.api_headers,

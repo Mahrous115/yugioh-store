@@ -70,6 +70,100 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- ─── Order placement ────────────────────────────────────────
+--
+-- Placing an order prices it, reserves stock and records it. All three must happen
+-- together or not at all, and PostgREST cannot span statements in a transaction --
+-- so the whole operation lives here rather than in routers/orders.py.
+--
+-- SELECT ... FOR UPDATE serialises concurrent buyers of the same listing. Without
+-- it, four buyers all read stock=2 and all four orders succeed (AUDIT.md L8).
+-- Prices are read from the same locked row the stock came from, so a concurrent
+-- repricing cannot land between the quote and the charge (AUDIT.md C2).
+--
+-- See migrations/003_l8_transactional_stock.sql for the applied version.
+
+CREATE OR REPLACE FUNCTION public.place_order(
+    p_user_id        uuid,
+    p_items          jsonb,
+    p_expected_total numeric DEFAULT NULL
+)
+RETURNS public.orders
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_item     jsonb;
+    v_card_id  integer;
+    v_qty      integer;
+    v_listing  public.listings;
+    v_total    numeric(10, 2) := 0;
+    v_items    jsonb := '[]'::jsonb;
+    v_order    public.orders;
+BEGIN
+    IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+        RAISE EXCEPTION 'EMPTY_ORDER';
+    END IF;
+
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+    LOOP
+        v_card_id := (v_item ->> 'card_id')::integer;
+        v_qty     := (v_item ->> 'quantity')::integer;
+
+        IF v_qty IS NULL OR v_qty < 1 THEN
+            RAISE EXCEPTION 'BAD_QUANTITY:%', v_card_id;
+        END IF;
+
+        SELECT * INTO v_listing
+        FROM public.listings
+        WHERE card_id = v_card_id
+        FOR UPDATE;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'NOT_LISTED:%', v_card_id;
+        END IF;
+
+        IF v_listing.stock < v_qty THEN
+            RAISE EXCEPTION 'INSUFFICIENT_STOCK:%:%:%',
+                v_listing.stock, v_qty, v_listing.card_name;
+        END IF;
+
+        UPDATE public.listings
+        SET stock = stock - v_qty
+        WHERE id = v_listing.id;
+
+        v_total := v_total + (v_listing.price * v_qty);
+
+        v_items := v_items || jsonb_build_object(
+            'card_id',    v_listing.card_id,
+            'card_name',  v_listing.card_name,
+            'card_image', v_listing.card_image,
+            'price',      v_listing.price,
+            'quantity',   v_qty
+        );
+    END LOOP;
+
+    IF p_expected_total IS NOT NULL
+       AND round(p_expected_total, 2) <> round(v_total, 2) THEN
+        RAISE EXCEPTION 'TOTAL_MISMATCH:%:%', v_total, round(p_expected_total, 2);
+    END IF;
+
+    INSERT INTO public.orders (user_id, items, total)
+    VALUES (p_user_id, v_items, v_total)
+    RETURNING * INTO v_order;
+
+    RETURN v_order;
+END;
+$$;
+
+-- Backend only. Granting this to anon/authenticated would let the browser create
+-- orders without passing through the API's auth and rate limiting -- the same shape
+-- of hole as H1, reopened through a different door.
+REVOKE ALL ON FUNCTION public.place_order(uuid, jsonb, numeric) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.place_order(uuid, jsonb, numeric) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.place_order(uuid, jsonb, numeric) TO service_role;
+
 -- ─── Table privileges ────────────────────────────────────────
 --
 -- These are Supabase's permissive defaults, recorded here because they are half of
