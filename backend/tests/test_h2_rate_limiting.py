@@ -91,6 +91,30 @@ def test_429_is_well_formed(api, make_user, listing):
     )
 
 
+def test_retry_after_is_readable_from_a_browser(api, make_user, listing):
+    """Retry-After is useless to the frontend unless CORS exposes it.
+
+    It is not a CORS-safelisted response header, so without an explicit
+    Access-Control-Expose-Headers the browser hides it from JS and the cart cannot
+    tell the shopper how long to wait -- the header is sent and silently unreadable.
+    """
+    user = make_user()
+    for _ in range(ORDER_LIMIT_PER_MIN + 2):
+        r = httpx.post(
+            f"{api}/api/orders/",
+            headers={**user.api_headers, "Origin": "http://localhost:5173"},
+            json=_order_payload(listing), timeout=30,
+        )
+        if r.status_code == 429:
+            exposed = r.headers.get("access-control-expose-headers", "")
+            assert "retry-after" in exposed.lower(), (
+                f"Retry-After is not exposed to the browser (got {exposed!r}); "
+                "JS cannot read it and the 429 message cannot say how long to wait"
+            )
+            return
+    pytest.fail("never hit the limit")
+
+
 def test_429_still_carries_security_headers(api, make_user, listing):
     """A throttled response is still a response (AUDIT.md M5)."""
     user = make_user()

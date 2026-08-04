@@ -130,6 +130,10 @@ app.add_middleware(
     # Only what the API actually exposes, rather than "*".
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    # Retry-After is not a CORS-safelisted response header, so without this the
+    # browser receives it and hides it from JS -- the cart could not tell a
+    # rate-limited shopper how long to wait.
+    expose_headers=["Retry-After"],
 )
 
 app.include_router(listings.router, prefix="/api/listings", tags=["Listings"])
