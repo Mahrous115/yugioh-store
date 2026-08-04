@@ -20,6 +20,14 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Database dumps — may contain live user data, never commit
+*.sql
+*.dump
+# Schema and migrations are source, not dumps, and must stay tracked.
+!schema.sql
+!migrations/
+!migrations/*.sql
+
 # IDE
 .vscode/
 .idea/

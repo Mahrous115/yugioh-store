@@ -77,10 +77,8 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- RLS does not cover is wide open — that combination is exactly what produced the
 -- privilege-escalation bug fixed in step 2 (see AUDIT.md, finding C1).
 --
--- Live state as of 2026-08-04: anon and authenticated both hold
---   SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
--- on all four public tables. Supabase applies these automatically to new tables
--- via ALTER DEFAULT PRIVILEGES; they are not issued by this file.
+-- Supabase applies these automatically to new tables via ALTER DEFAULT PRIVILEGES;
+-- they are not issued by this file.
 --
 -- Verify with:
 --   SELECT table_name, grantee, privilege_type
@@ -88,8 +86,34 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 --   WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
 
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-    ON public.profiles, public.wishlists, public.listings, public.orders
+    ON public.wishlists, public.listings, public.orders
     TO anon, authenticated;
+
+-- profiles is the exception: table-wide UPDATE covered every column, including
+-- `role`, which was half of finding C1. See migrations/001. UPDATE is granted
+-- per column instead, and `role` is deliberately not among them.
+GRANT SELECT, INSERT, DELETE, TRUNCATE, REFERENCES, TRIGGER
+    ON public.profiles TO anon, authenticated;
+GRANT UPDATE (username) ON public.profiles TO authenticated;
+
+-- ─── Helper: read the caller's stored role without tripping RLS ─────────────
+--
+-- Used by the profiles_update_own WITH CHECK below. Reading public.profiles from
+-- inside a policy ON public.profiles recurses; SECURITY DEFINER runs as the owner
+-- and so is exempt from RLS. It only ever discloses the caller's own role.
+
+CREATE OR REPLACE FUNCTION public.current_profile_role()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT role FROM public.profiles WHERE id = auth.uid();
+$$;
+
+REVOKE ALL ON FUNCTION public.current_profile_role() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.current_profile_role() TO anon, authenticated;
 
 -- ─── Row Level Security ──────────────────────────────────────
 
@@ -98,9 +122,19 @@ ALTER TABLE public.wishlists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.listings  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders    ENABLE ROW LEVEL SECURITY;
 
--- profiles: users see / edit only their own row
+-- profiles: users see / edit only their own row, and may not change their own role.
+--
+-- WITH CHECK is what stops privilege escalation (AUDIT.md C1). Without it Postgres
+-- reuses USING as the check, and since `id` never changes during a self-update,
+-- setting role='admin' passed. WITH CHECK can only see the NEW row, so the stored
+-- value is fetched via the SECURITY DEFINER helper above.
 CREATE POLICY "profiles_select_own"  ON public.profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "profiles_update_own"  ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "profiles_update_own"  ON public.profiles FOR UPDATE
+    USING (auth.uid() = id)
+    WITH CHECK (
+        auth.uid() = id
+        AND role IS NOT DISTINCT FROM public.current_profile_role()
+    );
 
 -- wishlists: fully private to the owning user
 CREATE POLICY "wishlists_select_own" ON public.wishlists FOR SELECT USING (auth.uid() = user_id);
