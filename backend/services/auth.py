@@ -1,56 +1,56 @@
 """JWT verification helpers for FastAPI dependency injection."""
 import logging
-from fastapi import HTTPException, Depends, Header
 from typing import Optional
+
+from fastapi import Depends, Header, HTTPException
+
 from services.supabase_client import supabase
 
 logger = logging.getLogger(__name__)
+
+# One fixed message for every way a token can be bad: malformed, wrong signature,
+# expired, revoked, or the auth service being unreachable. The caller learns only
+# that the token did not work, which is all they are entitled to know before
+# authenticating (AUDIT.md M3). The real cause goes to the server log.
+INVALID_TOKEN_DETAIL = "Invalid or expired token"
+NOT_AUTHENTICATED_DETAIL = "Not authenticated"
+ADMIN_REQUIRED_DETAIL = "Admin access required"
 
 
 def get_current_user(authorization: Optional[str] = Header(None)):
     """Verify the Bearer token from the Authorization header using Supabase Auth."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise HTTPException(status_code=401, detail=NOT_AUTHENTICATED_DETAIL)
 
     token = authorization.split(" ", 1)[1]
-    logger.info("get_current_user: token prefix=%s… (len=%d)", token[:30], len(token))
+    logger.info("get_current_user: verifying token (len=%d)", len(token))
 
     try:
         response = supabase.auth.get_user(token)
-
-        logger.info(
-            "get_user response type=%s  user=%s  error=%s",
-            type(response).__name__,
-            getattr(response, "user", "ATTR_MISSING"),
-            getattr(response, "error", "ATTR_MISSING"),
-        )
-
-        if not response or not response.user:
-            logger.warning("get_user returned no user — full response: %r", response)
-            raise HTTPException(status_code=401, detail="Invalid token")
-
-        logger.info("authenticated: user_id=%s email=%s",
-                    response.user.id, response.user.email)
-        return response.user
-
-    except HTTPException:
-        raise
     except Exception as exc:
-        # Log the full exception type, message, and traceback so it appears
-        # in Railway logs — this is the key line for diagnosing the 404.
-        logger.error(
-            "get_user raised %s: %s",
+        # Full detail server-side only. This covers both "the token is bad" and
+        # "Supabase is unreachable", which look identical to the client on purpose:
+        # distinguishing them is exactly the oracle M3 is about.
+        logger.warning(
+            "token verification failed: %s: %s",
             type(exc).__name__, exc,
             exc_info=True,
         )
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        raise HTTPException(status_code=401, detail=INVALID_TOKEN_DETAIL) from exc
+
+    if not response or not response.user:
+        logger.warning("token verification returned no user")
+        raise HTTPException(status_code=401, detail=INVALID_TOKEN_DETAIL)
+
+    logger.info("authenticated: user_id=%s", response.user.id)
+    return response.user
 
 
 def get_admin_user(user=Depends(get_current_user)):
     """Extend get_current_user: also assert the user has role='admin' in profiles."""
     try:
-        # Use .limit(1) instead of .single() — .single() raises when 0 rows are
-        # found (PostgREST returns 404/406) and that exception escapes as a 404.
+        # .limit(1) rather than .single(): .single() raises when 0 rows are found,
+        # and that exception used to escape as a 404.
         result = (
             supabase.table("profiles")
             .select("role")
@@ -60,10 +60,17 @@ def get_admin_user(user=Depends(get_current_user)):
         )
         role = result.data[0].get("role") if result.data else None
     except Exception as exc:
-        logger.error("profiles role check failed for user %s: %s", user.id, exc, exc_info=True)
-        raise HTTPException(status_code=403, detail="Admin access required") from exc
+        # Fail closed, and say nothing about why.
+        logger.error(
+            "profiles role lookup failed for user %s: %s: %s",
+            user.id, type(exc).__name__, exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=403, detail=ADMIN_REQUIRED_DETAIL) from exc
 
-    logger.info("admin check: user=%s role=%s", user.id, role)
     if role != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
+        logger.info("admin check denied: user=%s role=%s", user.id, role)
+        raise HTTPException(status_code=403, detail=ADMIN_REQUIRED_DETAIL)
+
+    logger.info("admin check passed: user=%s", user.id)
     return user
