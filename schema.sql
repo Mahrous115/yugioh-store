@@ -86,8 +86,13 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 --   WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
 
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-    ON public.wishlists, public.listings, public.orders
+    ON public.wishlists, public.listings
     TO anon, authenticated;
+
+-- orders is read-only to the browser. Writes go through the backend service key.
+-- The INSERT/UPDATE/DELETE privileges are revoked as well as the policy dropped,
+-- so re-adding a policy by accident cannot silently reopen H1. See migrations/002.
+GRANT SELECT, TRUNCATE, REFERENCES, TRIGGER ON public.orders TO anon, authenticated;
 
 -- profiles is the exception: table-wide UPDATE covered every column, including
 -- `role`, which was half of finding C1. See migrations/001. UPDATE is granted
@@ -144,9 +149,16 @@ CREATE POLICY "wishlists_delete_own" ON public.wishlists FOR DELETE USING (auth.
 -- listings: anyone can read; writes go through the backend service-key (bypasses RLS)
 CREATE POLICY "listings_select_all"  ON public.listings  FOR SELECT USING (true);
 
--- orders: users see only their own orders; inserts checked via backend service-key
+-- orders: users read only their own. There is deliberately NO insert policy --
+-- orders are written exclusively by the backend, which holds the service-role key
+-- and bypasses RLS. RLS denies by default, so the browser cannot write here.
+--
+-- An orders_insert_own policy previously allowed direct INSERT with the anon key,
+-- checking only that user_id matched the caller and nothing about the contents.
+-- That let anyone forge an order for any amount without touching FastAPI
+-- (AUDIT.md H1). Removed in migrations/002 -- do not reintroduce it. Any pricing
+-- validation in routers/orders.py is void while the browser can skip the backend.
 CREATE POLICY "orders_select_own"    ON public.orders    FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "orders_insert_own"    ON public.orders    FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Admins read every order — this is what makes the admin analytics dashboard
 -- (frontend/src/pages/Admin.jsx) report real figures rather than just the admin's
