@@ -1,6 +1,13 @@
 -- =============================================================
 -- Yu-Gi-Oh! Duel Market — Supabase Schema
 -- Run this in your Supabase SQL editor (Dashboard → SQL Editor)
+--
+-- THIS FILE MUST MATCH THE DEPLOYED DATABASE.
+-- Reconciled against the live project on 2026-08-04. Enforced by
+-- backend/tests/test_schema_sync.py, which fails if the two drift apart.
+--
+-- If you change policies or grants through the Supabase dashboard,
+-- mirror the change here in the same session or the suite will fail.
 -- =============================================================
 
 -- ─── Tables ─────────────────────────────────────────────────
@@ -63,6 +70,27 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- ─── Table privileges ────────────────────────────────────────
+--
+-- These are Supabase's permissive defaults, recorded here because they are half of
+-- the access-control story. RLS narrows what these grants allow, but a grant that
+-- RLS does not cover is wide open — that combination is exactly what produced the
+-- privilege-escalation bug fixed in step 2 (see AUDIT.md, finding C1).
+--
+-- Live state as of 2026-08-04: anon and authenticated both hold
+--   SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+-- on all four public tables. Supabase applies these automatically to new tables
+-- via ALTER DEFAULT PRIVILEGES; they are not issued by this file.
+--
+-- Verify with:
+--   SELECT table_name, grantee, privilege_type
+--   FROM information_schema.role_table_grants
+--   WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated');
+
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+    ON public.profiles, public.wishlists, public.listings, public.orders
+    TO anon, authenticated;
+
 -- ─── Row Level Security ──────────────────────────────────────
 
 ALTER TABLE public.profiles  ENABLE ROW LEVEL SECURITY;
@@ -85,3 +113,19 @@ CREATE POLICY "listings_select_all"  ON public.listings  FOR SELECT USING (true)
 -- orders: users see only their own orders; inserts checked via backend service-key
 CREATE POLICY "orders_select_own"    ON public.orders    FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "orders_insert_own"    ON public.orders    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Admins read every order — this is what makes the admin analytics dashboard
+-- (frontend/src/pages/Admin.jsx) report real figures rather than just the admin's
+-- own purchases, since it queries through the anon-key browser client.
+--
+-- DRIFT NOTE: this policy was applied directly through the Supabase dashboard and
+-- was missing from this file until 2026-08-04. Its absence caused a false finding in
+-- AUDIT.md (M2-RETRACTED), which claimed admin analytics under-reported revenue.
+-- It also widens finding C1: while self-promotion to admin was possible, an attacker
+-- gained read access to every customer's order history through this policy.
+CREATE POLICY "orders_select_admin"  ON public.orders    FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+);
