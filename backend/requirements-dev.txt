@@ -1,9 +1,30 @@
-# Test-only dependencies. Install with:
+# Test-only dependencies, pinned. Install alongside the runtime pins:
 #   pip install -r requirements.txt -r requirements-dev.txt
 #
-# The suite is an integration suite: it runs against the real Supabase project and a
-# locally running backend, because there is no Docker here and no local Supabase Auth.
-# It creates throwaway users and deletes them on teardown.
-pytest
-psycopg[binary]   # direct Postgres access, for asserting on RLS policies and grants
-httpx             # already a supabase transitive dep; named explicitly for test use
+# Deliberately NOT part of requirements.txt: none of this belongs in the
+# production image. Keeping them separate keeps the image smaller and its
+# attack surface narrower.
+#
+# The suite is an integration suite: it runs against the real Supabase project
+# and a locally running backend, because there is no Docker here and no local
+# Supabase Auth. It creates throwaway users and listings and deletes them on
+# teardown. It cannot run as a Docker build step — it needs live credentials and
+# a server already listening.
+#
+# Generated on 2026-08-05 as the delta between a clean runtime venv and the same
+# venv with the dev tools added, so nothing already pinned in requirements.txt is
+# repeated here. httpx in particular is a runtime dependency of supabase and is
+# pinned there, not below.
+
+pytest==9.1.1
+psycopg==3.3.4
+psycopg-binary==3.3.4   # compiled driver; same version has Linux and Windows wheels
+
+# ─── Transitive, pinned for the same reason as the runtime ones ─────────────
+iniconfig==2.3.0
+pluggy==1.6.0
+Pygments==2.20.0
+
+# Pulled in by psycopg on Windows, which has no system timezone database.
+# Unnecessary on Linux — harmless, but drop it if you regenerate these pins there.
+tzdata==2026.3
