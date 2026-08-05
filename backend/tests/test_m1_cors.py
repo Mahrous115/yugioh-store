@@ -11,22 +11,35 @@ should have blunted H3 (tokens in localStorage) and did not.
 The replacement must still admit the local dev server and this project's own
 Vercel preview deployments, which is what the wildcard was reaching for.
 """
+import os
+
 import httpx
 import pytest
 
-# Preview URLs Vercel actually generates for this project.
+# The project slug is configuration, not a constant -- it moved out of main.py so
+# that deploying this elsewhere does not mean editing source. The tests read the
+# same variable the app does, and skip the preview cases when it is not set.
+SLUG = os.getenv("VERCEL_PROJECT_SLUG", "").strip()
+
+requires_slug = pytest.mark.skipif(
+    not SLUG,
+    reason="VERCEL_PROJECT_SLUG not configured; no preview origins to test",
+)
+
+# Preview URLs Vercel generates for whichever project is configured.
 VERCEL_PREVIEWS = [
-    "https://project-4yktn.vercel.app",                    # production
-    "https://project-4yktn-git-main-mahrous.vercel.app",   # branch deploy
-    "https://project-4yktn-abc123xyz.vercel.app",          # commit deploy
+    f"https://{SLUG}.vercel.app",                    # production
+    f"https://{SLUG}-git-main-mahrous.vercel.app",   # branch deploy
+    f"https://{SLUG}-abc123xyz.vercel.app",          # commit deploy
 ]
 
+# Smuggling variants are built from the same slug, so they stay meaningful.
 FOREIGN_ORIGINS = [
     "https://evil.example.com",
-    "https://project-4yktn.vercel.app.evil.com",   # suffix smuggling
-    "https://evil-project-4yktn.vercel.app",       # prefix smuggling
-    "https://someone-elses-app.vercel.app",        # different Vercel project
-    "http://project-4yktn.vercel.app",             # downgraded to http
+    f"https://{SLUG}.vercel.app.evil.com",   # suffix smuggling
+    f"https://evil-{SLUG}.vercel.app",       # prefix smuggling
+    "https://someone-elses-app.vercel.app",  # different Vercel project
+    f"http://{SLUG}.vercel.app",             # downgraded to http
 ]
 
 
@@ -63,6 +76,7 @@ def test_local_dev_origin_is_allowed(api):
     )
 
 
+@requires_slug
 @pytest.mark.parametrize("origin", VERCEL_PREVIEWS)
 def test_own_vercel_previews_are_allowed(api, origin):
     """The legitimate need the wildcard was papering over."""

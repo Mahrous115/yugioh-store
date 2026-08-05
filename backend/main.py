@@ -1,6 +1,8 @@
 """FastAPI application entry point."""
+import logging
 import os
 import re
+import sys
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +14,30 @@ from dotenv import load_dotenv
 from routers import listings, wishlist, orders
 from services.rate_limit import limiter, rate_limit_exceeded_handler
 
+# In a container there is no .env file; the platform injects real environment
+# variables. load_dotenv() does not overwrite variables that are already set, so
+# this stays useful locally and is a no-op in production.
 load_dotenv()
+
+
+# ─── Logging ─────────────────────────────────────────────────────────────────
+#
+# Explicitly to stdout. Nothing in this app writes log files, and a container must
+# not start: the platform collects stdout/stderr, and a file inside the container
+# is lost when it restarts and invisible while it runs.
+#
+# Without this, app loggers inherit the root default of WARNING, so every
+# logger.info() in the codebase was silently discarded.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    stream=sys.stdout,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    force=True,   # replace anything a dependency configured first
+)
+
+logger = logging.getLogger(__name__)
 
 # Interactive docs publish a complete map of every endpoint, parameter and model.
 # Useful locally, pure reconnaissance value in production, so they are off unless
@@ -20,10 +45,13 @@ load_dotenv()
 # unset, empty, "false", "0" and "no" all leave them shut.
 ENABLE_DOCS = os.getenv("ENABLE_DOCS", "").strip().lower() in ("1", "true", "yes", "on")
 
+API_TITLE = os.getenv("API_TITLE", "Yu-Gi-Oh! Duel Market API")
+API_VERSION = os.getenv("API_VERSION", "1.0.0")
+
 app = FastAPI(
-    title="Yu-Gi-Oh! Duel Market API",
+    title=API_TITLE,
     description="Backend for the YGO e-commerce demo. Card data comes from YGOPRODeck.",
-    version="1.0.0",
+    version=API_VERSION,
     docs_url="/docs" if ENABLE_DOCS else None,
     redoc_url="/redoc" if ENABLE_DOCS else None,
     # Closing this alone would disable /docs and /redoc too, since they fetch it;
@@ -99,29 +127,80 @@ app.add_middleware(SecurityHeadersMiddleware)
 # This was allow_origins=["*"] so that Vercel preview URLs were never blocked.
 # The need was real; the wildcard was not the way to meet it. See AUDIT.md M1.
 #
-# FRONTEND_URL accepts a comma-separated list, so additional fixed origins can be
-# added without a code change. Preview deployments are matched by pattern, since
-# their hostnames are generated per commit and cannot be enumerated in advance.
+# Everything here is environment-driven so that adding an origin -- an Azure
+# Container Apps URL, a Static Web Apps URL, a new custom domain -- is a config
+# change on the running revision, not a rebuild.
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-ALLOWED_ORIGINS = [o.strip().rstrip("/") for o in FRONTEND_URL.split(",") if o.strip()]
+DEFAULT_DEV_ORIGIN = "http://localhost:5173"
 
-# Matches this project's own Vercel deployments only:
-#   https://project-4yktn.vercel.app                    (production)
-#   https://project-4yktn-git-<branch>-<scope>.vercel.app
-#   https://project-4yktn-<hash>.vercel.app
+
+def _split_origins(raw):
+    """Comma-separated origins -> normalised list. Trailing slashes are dropped
+    because the browser never sends one in the Origin header."""
+    return [o.strip().rstrip("/") for o in (raw or "").split(",") if o.strip()]
+
+
+# CORS_ALLOWED_ORIGINS is the intended knob. FRONTEND_URL is the older name and is
+# still honoured -- it is set in existing .env files and documented in the README,
+# and silently ignoring it would fail as "CORS is broken" with no clue why. Both
+# are merged rather than one overriding the other, so setting either works.
+_configured_origins = (
+    _split_origins(os.getenv("CORS_ALLOWED_ORIGINS"))
+    + _split_origins(os.getenv("FRONTEND_URL"))
+)
+
+# The local dev origin is always allowed: it is not a secret, it is not reachable
+# from anywhere but the developer's own machine, and leaving it out is the single
+# most common way to make local work mysteriously stop.
+ALLOWED_ORIGINS = list(dict.fromkeys(_configured_origins + [DEFAULT_DEV_ORIGIN]))
+
+# Preview deployments get a generated hostname per commit, so they cannot be
+# enumerated ahead of time and have to be matched by pattern.
 #
-# Anchored at both ends and https-only, so none of these get through:
-#   https://evil-project-4yktn.vercel.app       (prefix smuggling)
-#   https://project-4yktn.vercel.app.evil.com   (suffix smuggling)
-#   http://project-4yktn.vercel.app             (downgraded scheme)
-VERCEL_PROJECT_SLUG = os.getenv("VERCEL_PROJECT_SLUG", "project-4yktn")
-VERCEL_PREVIEW_REGEX = rf"^https://{re.escape(VERCEL_PROJECT_SLUG)}(-[a-z0-9-]+)?\.vercel\.app$"
+# Two ways to configure it, both defaulting to "no preview matching at all":
+#
+#   VERCEL_PROJECT_SLUG        convenience -- builds the standard Vercel pattern
+#                              for one project. No default: this used to be
+#                              hardcoded to a specific project's slug, which is
+#                              deployment config living in source.
+#
+#   CORS_PREVIEW_ORIGIN_REGEX  escape hatch -- a full regex, for any other host
+#                              (Azure Static Web Apps, Netlify, a custom scheme).
+#                              Takes precedence when both are set.
+#
+# The generated pattern is anchored at both ends and https-only, so none of these
+# get through: https://evil-<slug>.vercel.app (prefix smuggling),
+# https://<slug>.vercel.app.evil.com (suffix smuggling), http://<slug>.vercel.app
+# (downgraded scheme). A hand-written regex must anchor itself.
+VERCEL_PROJECT_SLUG = os.getenv("VERCEL_PROJECT_SLUG", "").strip()
+_preview_regex = os.getenv("CORS_PREVIEW_ORIGIN_REGEX", "").strip()
+
+if not _preview_regex and VERCEL_PROJECT_SLUG:
+    _preview_regex = (
+        rf"^https://{re.escape(VERCEL_PROJECT_SLUG)}(-[a-z0-9-]+)?\.vercel\.app$"
+    )
+
+PREVIEW_ORIGIN_REGEX = _preview_regex or None
+
+if PREVIEW_ORIGIN_REGEX:
+    # Fail at startup rather than serving with a pattern that never matches.
+    try:
+        re.compile(PREVIEW_ORIGIN_REGEX)
+    except re.error as exc:
+        raise RuntimeError(
+            f"CORS_PREVIEW_ORIGIN_REGEX is not a valid regular expression: {exc}"
+        ) from exc
+
+logger.info(
+    "CORS: %d fixed origin(s); preview pattern %s",
+    len(ALLOWED_ORIGINS),
+    "configured" if PREVIEW_ORIGIN_REGEX else "not set",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=VERCEL_PREVIEW_REGEX,
+    allow_origin_regex=PREVIEW_ORIGIN_REGEX,
     # Stays False: auth is a Bearer token in the Authorization header, never a
     # cookie, so the browser has no ambient credential to attach. Nothing needs
     # credentialed CORS, and leaving it off keeps a hostile page from replaying a
@@ -141,6 +220,54 @@ app.include_router(wishlist.router, prefix="/api/wishlist", tags=["Wishlist"])
 app.include_router(orders.router,   prefix="/api/orders",   tags=["Orders"])
 
 
-@app.get("/", tags=["Health"])
-def health_check():
+# ─── Health ──────────────────────────────────────────────────────────────────
+#
+# Deliberately does NOT touch Supabase. A probe that checks the database conflates
+# "this container is alive" with "a third party is reachable": a Supabase blip
+# would make the platform kill and restart healthy replicas, turning a partial
+# outage into a total one. Readiness of a dependency is a different question from
+# liveness of the process, and this endpoint answers the second.
+#
+# Both routes are exempt from rate limiting -- a probe hitting a fixed endpoint
+# every few seconds is exactly the traffic the limiter is built to reject, and a
+# throttled 429 would read as an unhealthy container.
+
+@app.get("/health", tags=["Health"])
+@limiter.exempt
+def health():
+    """Liveness probe. 200 as long as the process is serving."""
     return {"status": "ok", "service": "yugioh-store-api"}
+
+
+@app.get("/", tags=["Health"])
+@limiter.exempt
+def health_check():
+    """Kept alongside /health: existing clients and tests use it."""
+    return {"status": "ok", "service": "yugioh-store-api"}
+
+
+# ─── Container entrypoint ────────────────────────────────────────────────────
+#
+# Lets the image run `python main.py` with no uvicorn flags to get wrong.
+#
+# Binding 0.0.0.0 is required: the default 127.0.0.1 only accepts connections from
+# inside the container, so the platform's health probe and ingress cannot reach it
+# and the revision never goes healthy.
+#
+# Azure Container Apps sets PORT to the configured target port. The 8000 default
+# keeps `python main.py` working locally.
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8000"))
+    logger.info("starting uvicorn on 0.0.0.0:%d", port)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",   # noqa: S104 - intentional; see above
+        port=port,
+        log_level=LOG_LEVEL.lower(),
+        # Behind the platform's ingress, so trust its forwarding headers for the
+        # client IP the rate limiter buckets on.
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
