@@ -101,11 +101,37 @@ def get_current_user(authorization: Optional[str] = Header(None)):
         # verdicts on the token rather than transport problems.
         logger.warning("token rejected: %s: %s", type(exc).__name__, exc)
         raise HTTPException(status_code=401, detail=INVALID_TOKEN_DETAIL) from exc
+    except httpx.LocalProtocolError as exc:
+        # The one httpx.HTTPError that means "we built a request that is not
+        # valid HTTP", rather than "the network failed". It must be caught before
+        # the branch below, which it would otherwise match.
+        #
+        # Both of the faults that produced it here were ours. A credential
+        # carrying whitespace makes an illegal header value (now rejected at
+        # import in services/supabase_client.py). And h2 stream-state corruption
+        # from sharing one HTTP/2 connection across threads arrived this way too:
+        # httpcore maps h2.exceptions.ProtocolError -- StreamIDTooLowError among
+        # them -- to LocalProtocolError (httpcore/_sync/http2.py:171-185).
+        #
+        # Neither is Supabase being unwell, so 503 was the wrong answer: it told
+        # clients with Retry-After to retry a defect that would never resolve on
+        # its own, and pointed dashboards at a third party for our own bug.
+        logger.error(
+            "malformed request built locally: %s: %s",
+            type(exc).__name__, exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=AUTH_FAILED_DETAIL) from exc
     except httpx.HTTPError as exc:
         # Never reached the service, so there is no verdict to report. gotrue only
         # converts HTTPStatusError and RuntimeError, so genuine transport failures
         # -- ConnectError, ReadTimeout, RemoteProtocolError, PoolTimeout -- arrive
         # here as themselves.
+        #
+        # RemoteProtocolError stays here deliberately: it means the peer spoke
+        # badly or the connection died, which is not something this process can
+        # be sure it caused. h2's ConnectionTerminated takes that path, so the
+        # branch above does not claim the whole HTTP/2 failure class.
         raise _unavailable(exc) from exc
     except Exception as exc:
         # An exception we did not anticipate is a bug here, not a judgement on the

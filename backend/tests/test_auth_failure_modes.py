@@ -82,7 +82,9 @@ def test_other_auth_errors_are_401(raising, exc):
 def test_transport_errors_are_503(raising, exc):
     """gotrue only converts HTTPStatusError and RuntimeError, so these arrive raw.
 
-    RemoteProtocolError is the shape the shared-HTTP/2 corruption produced.
+    RemoteProtocolError stays here on purpose: the peer spoke badly or the
+    connection died, and this process cannot be sure it caused that. h2's
+    ConnectionTerminated arrives this way.
     """
     raising(exc)
     assert _call().status_code == 503
@@ -117,6 +119,32 @@ def test_503_carries_retry_after(raising):
 
 
 # ── A bug here: 500 ──────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("message", [
+    "Illegal header value b'abc\\n'",     # a credential carrying whitespace
+    "Stream ID 3 is lower than the last",  # h2 corruption, via httpcore's mapping
+])
+def test_local_protocol_errors_are_500_not_503(raising, message):
+    """A request we built badly is our defect, not an outage.
+
+    LocalProtocolError is an httpx.HTTPError, so it would otherwise match the
+    transport branch and answer 503 with Retry-After -- telling clients to retry
+    something that will never fix itself, and pointing dashboards at Supabase for
+    a bug on this side. Both faults seen in practice arrived this way: a
+    whitespace-tainted credential, and h2 stream-state corruption from sharing one
+    HTTP/2 connection across threads.
+    """
+    raising(httpx.LocalProtocolError(message))
+    failure = _call()
+    assert failure.status_code == 500
+    assert failure.detail == AUTH_FAILED_DETAIL
+
+
+def test_local_protocol_error_carries_no_retry_after(raising):
+    """Retry-After on a permanent defect is an instruction to loop forever."""
+    raising(httpx.LocalProtocolError("Illegal header value"))
+    assert not (_call().headers or {}).get("Retry-After")
+
 
 def test_unexpected_exception_is_500(raising):
     """Not a judgement on the caller. Still fails closed -- no user is returned."""
