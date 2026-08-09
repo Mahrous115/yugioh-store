@@ -16,6 +16,10 @@ import os
 import httpx
 import pytest
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 # The project slug is configuration, not a constant -- it moved out of main.py so
 # that deploying this elsewhere does not mean editing source. The tests read the
 # same variable the app does, and skip the preview cases when it is not set.

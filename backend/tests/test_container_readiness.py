@@ -19,12 +19,16 @@ from fastapi.testclient import TestClient
 
 # ── /health ──────────────────────────────────────────────────────────────────
 
+# Only the two probes below need the running backend. Everything else in this
+# file reloads main in-process or reads its source, so it stays in the unit run.
+@pytest.mark.integration
 def test_health_returns_200(api):
     r = httpx.get(f"{api}/health", timeout=30)
     assert r.status_code == 200, f"health probe failed: HTTP {r.status_code}"
     assert r.json()["status"] == "ok"
 
 
+@pytest.mark.integration
 def test_root_still_healthy(api):
     """/ predates /health and existing callers still use it."""
     r = httpx.get(f"{api}/", timeout=30)

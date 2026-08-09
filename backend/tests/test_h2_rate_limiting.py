@@ -14,6 +14,10 @@ import pytest
 from conftest import ORDER_LIMIT_PER_MIN, WISHLIST_LIMIT_PER_MIN
 
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 @pytest.fixture
 def listing(temp_listing):
     """Disposable and deeply stocked: these tests place many orders on purpose."""

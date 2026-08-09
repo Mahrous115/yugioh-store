@@ -18,6 +18,9 @@ DOC_PATHS = ["/docs", "/redoc", "/openapi.json"]
 
 # ── Default posture, against the running server ──────────────────────────────
 
+# These two assert the posture of the deployed process; the toggle tests below
+# reload main in-process and need nothing running.
+@pytest.mark.integration
 @pytest.mark.parametrize("path", DOC_PATHS)
 def test_docs_are_closed_by_default(api, path):
     r = httpx.get(f"{api}{path}", timeout=30)
@@ -26,6 +29,7 @@ def test_docs_are_closed_by_default(api, path):
     )
 
 
+@pytest.mark.integration
 def test_the_api_itself_still_works_with_docs_off(api):
     """Disabling docs must not disable anything real."""
     r = httpx.get(f"{api}/api/listings/", timeout=30)

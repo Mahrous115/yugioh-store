@@ -26,6 +26,7 @@ EXPECTED = {
 PATHS = ["/", "/api/listings/", "/api/orders/", "/no-such-route"]
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("header,value", sorted(EXPECTED.items()))
 def test_header_present_on_every_response(api, path, header, value):
@@ -36,6 +37,7 @@ def test_header_present_on_every_response(api, path, header, value):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("path", PATHS)
 def test_csp_is_present_and_locked_down(api, path):
     r = httpx.get(f"{api}{path}", timeout=30)
@@ -48,6 +50,7 @@ def test_csp_is_present_and_locked_down(api, path):
     assert "frame-ancestors 'none'" in csp, f"{path} CSP allows framing: {csp!r}"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("path", PATHS)
 def test_hsts_present(api, path):
     r = httpx.get(f"{api}{path}", timeout=30)
@@ -55,6 +58,7 @@ def test_hsts_present(api, path):
     assert "max-age=" in hsts, f"{path} missing Strict-Transport-Security: {hsts!r}"
 
 
+@pytest.mark.integration
 def test_headers_survive_an_auth_failure(api):
     """A 401 is exactly when you do not want headers quietly dropped."""
     r = httpx.get(f"{api}/api/orders/", headers={"Authorization": "Bearer nope"}, timeout=30)
@@ -64,6 +68,7 @@ def test_headers_survive_an_auth_failure(api):
     assert r.headers.get("content-security-policy")
 
 
+@pytest.mark.integration
 def test_existing_no_cache_behaviour_is_preserved(api):
     """The pre-existing headers must not be clobbered by the new middleware."""
     r = httpx.get(f"{api}/", timeout=30)
@@ -71,6 +76,7 @@ def test_existing_no_cache_behaviour_is_preserved(api):
     assert r.headers.get("pragma") == "no-cache"
 
 
+@pytest.mark.integration
 def test_cors_headers_still_work(api):
     """Middleware ordering must not break the M1 allowlist."""
     origin = "http://localhost:5173"

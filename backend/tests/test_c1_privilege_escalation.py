@@ -14,6 +14,10 @@ import pytest
 from conftest import ANON_KEY, SUPABASE_URL
 
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 def _read_role(user):
     """Read a user's own role through the browser-equivalent anon client."""
     r = httpx.get(

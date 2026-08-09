@@ -9,6 +9,10 @@ import re
 
 import pytest
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "schema.sql")
 
 

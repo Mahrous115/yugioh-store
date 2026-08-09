@@ -16,6 +16,10 @@ state, available before authenticating.
 import httpx
 import pytest
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 # Substrings that should never reach a client. Drawn from responses actually observed
 # on this backend, plus the usual shapes of leaked internals.
 LEAK_MARKERS = [

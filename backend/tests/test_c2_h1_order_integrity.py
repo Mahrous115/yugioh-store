@@ -16,6 +16,10 @@ import pytest
 from conftest import SUPABASE_URL
 
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 @pytest.fixture
 def listing(temp_listing):
     """A disposable, well-stocked listing.

@@ -15,6 +15,10 @@ import pytest
 
 from conftest import SUPABASE_URL, _service_headers
 
+
+# Every test here drives the running backend and a live Supabase project.
+pytestmark = pytest.mark.integration
+
 # temp_listing now lives in conftest.py so every suite can buy without
 # draining the real catalogue.
 
