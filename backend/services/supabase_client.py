@@ -11,8 +11,54 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_url: str = os.environ["SUPABASE_URL"]
-_key: str = os.environ["SUPABASE_SERVICE_KEY"]
+def _clean(name: str, raw: str) -> str:
+    """Strip surrounding whitespace, and refuse anything left inside.
+
+    A credential that picks up whitespace is not rejected by anything until it is
+    encoded into an HTTP header, at which point httpx raises LocalProtocolError
+    ("Illegal header value") on every request -- client-side, so nothing is sent
+    and nothing appears in any Supabase log. The app looks healthy and fails at
+    request time instead of startup. A single trailing space is enough.
+
+    The strip and the check are doing different jobs, and the check is the one
+    that matters. Stripping fixes a value with whitespace around it. A paste that
+    wrapped across lines puts newlines in the MIDDLE, where strip() removes
+    nothing at all and the value stays illegal -- so stripping alone would look
+    like protection while leaving the original failure intact. Do not delete the
+    interior check as redundant.
+
+    Deliberately no format validation: no sb_secret_ prefix check, no length
+    check. Supabase has changed key formats before and a validator encoding
+    today's shape becomes a false rejection the day they change it again.
+    Whitespace is safe to reject because it is invalid in an HTTP header value --
+    a property of HTTP, not of Supabase.
+
+    Nor is any attempt made to repair interior whitespace by removing it: a key
+    with a newline through it might be a wrapped paste, two keys concatenated, or
+    a truncation, and silently splicing it could authenticate as something
+    unintended.
+
+    Empty is not checked here on purpose -- create_client already raises
+    "supabase_url is required" / "supabase_key is required" at import, and a
+    whitespace-only value reaches that guard as empty once stripped.
+    """
+    value = raw.strip()
+    if any(character.isspace() for character in value):
+        # The value is never included: startup errors get pasted into issues.
+        raise RuntimeError(
+            f"{name} contains whitespace inside its value, which is almost always "
+            "a paste that wrapped across lines. Re-copy it as a single line. The "
+            "value is not shown here on purpose."
+        )
+    return value
+
+
+# Read and validated at import so a malformed credential is a startup failure --
+# on Container Apps, a crash-looping revision naming the variable, which
+# ENV_VARS.md already teaches you to read. The alternative is a revision that
+# goes healthy and then answers every request with an error.
+_url: str = _clean("SUPABASE_URL", os.environ["SUPABASE_URL"])
+_key: str = _clean("SUPABASE_SERVICE_KEY", os.environ["SUPABASE_SERVICE_KEY"])
 
 supabase: Client = create_client(_url, _key)
 
