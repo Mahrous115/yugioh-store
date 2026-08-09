@@ -39,7 +39,17 @@ def test_the_api_itself_still_works_with_docs_off(api):
 # reloading the module under a patched environment rather than restarting uvicorn.
 
 def _app_with_env(monkeypatch, value):
+    """Re-import main with ENABLE_DOCS forced to `value` (None means unset).
+
+    load_dotenv is stubbed out for the reload. Without it, re-importing main
+    re-reads backend/.env and puts back the very variable the test just deleted,
+    so the unset case would silently test the developer's local config instead.
+    The setenv cases were never affected -- load_dotenv does not override a
+    variable that is already set, and only the delenv path leaves a gap for it
+    to fill.
+    """
     import main
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
     if value is None:
         monkeypatch.delenv("ENABLE_DOCS", raising=False)
     else:
