@@ -19,14 +19,26 @@ def _translate_place_order_error(message: str) -> HTTPException:
     Pricing, stock and validation all live inside the function so they share one
     transaction (AUDIT.md C2 and L8). The trade-off is that failures arrive as
     Postgres exception strings and have to be translated back here.
+
+    `message` is the verbatim RAISE text, so every pattern is anchored at the start
+    with re.match rather than searched for anywhere in the string. Only the opening
+    field may decide which sentinel this is. INSUFFICIENT_STOCK ends with card_name,
+    which is free text: it may contain colons, newlines, quotes, and the spelling of
+    any other sentinel. Searching let a card called "Foo NOT_LISTED:9" answer for the
+    message it merely appeared in, turning its own 409 into a 400. That is also why
+    card_name is last in the SQL format string -- every field ahead of it is numeric,
+    so nothing a name contains can reach a capture group but its own.
     """
-    if match := re.search(r"NOT_LISTED:(\d+)", message):
+    if match := re.match(r"NOT_LISTED:(\d+)", message):
         return HTTPException(
             status_code=400,
             detail=f"Card {match.group(1)} is not available for purchase.",
         )
 
-    if match := re.search(r"INSUFFICIENT_STOCK:(\d+):(\d+):(.*)", message, re.DOTALL):
+    # Greedy, DOTALL, and running to the end of the string on purpose: group 3 is the
+    # whole remainder, so a name keeps its colons and newlines. `$` is avoided because
+    # it would quietly drop a trailing newline from the name.
+    if match := re.match(r"INSUFFICIENT_STOCK:(\d+):(\d+):(.*)", message, re.DOTALL):
         available, requested, card_name = match.groups()
         return HTTPException(
             status_code=409,  # a conflict with current state, not a malformed request
@@ -36,7 +48,7 @@ def _translate_place_order_error(message: str) -> HTTPException:
             ),
         )
 
-    if match := re.search(r"TOTAL_MISMATCH:([\d.]+):([\d.]+)", message):
+    if match := re.match(r"TOTAL_MISMATCH:([\d.]+):([\d.]+)", message):
         computed, given = match.groups()
         return HTTPException(
             status_code=400,
@@ -46,10 +58,11 @@ def _translate_place_order_error(message: str) -> HTTPException:
             ),
         )
 
-    if "EMPTY_ORDER" in message:
+    # The loosest of the five: a substring test matched EMPTY_ORDER anywhere at all.
+    if message == "EMPTY_ORDER":
         return HTTPException(status_code=422, detail="An order must contain at least one item.")
 
-    if match := re.search(r"BAD_QUANTITY:(\d+)", message):
+    if match := re.match(r"BAD_QUANTITY:(\d+)", message):
         return HTTPException(
             status_code=422,
             detail=f"Invalid quantity for card {match.group(1)}.",
@@ -97,16 +110,30 @@ def create_order(request: Request, order: OrderCreate, user=Depends(get_current_
     try:
         result = supabase.rpc("place_order", payload).execute()
     except Exception as exc:
-        # postgrest's APIError carries the raw RAISE text on .message; str(exc) is a
-        # dict repr, and parsing a trailing card name out of that swallows the
-        # surrounding "', 'code': 'P0001', ...}" too.
-        raw = getattr(exc, "message", None) or str(exc)
-        translated = _translate_place_order_error(raw)
+        # Only postgrest's APIError.message carries the RAISE text verbatim. str(exc)
+        # is a repr of the whole error dict, and a sentinel parsed out of that drags
+        # the surrounding "', 'code': 'P0001', ...}" into the detail the client is
+        # shown (AUDIT.md M3). So an exception carrying no .message is not a
+        # place_order sentinel, whatever its repr happens to spell, and is not parsed
+        # at all -- the guarantee sits at the source rather than resting on five
+        # regexes staying tight. .message is Optional[str] in postgrest, so
+        # present-but-None has to count as absent.
+        #
+        # The cost: were postgrest to stop exposing .message, every sentinel would
+        # collapse to a flat 500 and out-of-stock would stop being a 409. That is a
+        # visible, fail-closed regression instead of a silent leak; message=%r below
+        # names it in the log, and tests/test_m3_order_error_translation.py pins the
+        # attribute so a dependency bump fails there first.
+        raw = getattr(exc, "message", None)
+        translated = _translate_place_order_error(raw) if raw else None
         if translated is not None:
             raise translated from exc
         # An unrecognised database failure is a server-side problem, and its text
         # does not go to the client (AUDIT.md M3).
-        logger.error("place_order failed for user %s: %s", user.id, exc, exc_info=True)
+        logger.error(
+            "place_order failed for user %s (message=%r): %s",
+            user.id, raw, exc, exc_info=True,
+        )
         raise HTTPException(status_code=500, detail="Could not place order.") from exc
 
     if not result.data:  # pragma: no cover - defensive
