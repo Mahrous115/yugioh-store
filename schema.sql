@@ -81,6 +81,10 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- Prices are read from the same locked row the stock came from, so a concurrent
 -- repricing cannot land between the quote and the charge (AUDIT.md C2).
 --
+-- The listing lookup is STRICT: card_id currently carries a UNIQUE constraint, but
+-- multi-seller listings would remove it, and a non-STRICT SELECT INTO matching two
+-- rows picks one silently. See migrations/004_strict_single_listing_lookup.sql.
+--
 -- See migrations/003_l8_transactional_stock.sql for the applied version.
 
 CREATE OR REPLACE FUNCTION public.place_order(
@@ -115,14 +119,19 @@ BEGIN
             RAISE EXCEPTION 'BAD_QUANTITY:%', v_card_id;
         END IF;
 
-        SELECT * INTO v_listing
-        FROM public.listings
-        WHERE card_id = v_card_id
-        FOR UPDATE;
-
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'NOT_LISTED:%', v_card_id;
-        END IF;
+        -- STRICT so a second listing for one card stops the sale instead of being
+        -- picked arbitrarily. NO_DATA_FOUND has to be caught because STRICT raises it
+        -- before IF NOT FOUND could run; TOO_MANY_ROWS is left to propagate as a 500.
+        -- See migrations/004_strict_single_listing_lookup.sql.
+        BEGIN
+            SELECT * INTO STRICT v_listing
+            FROM public.listings
+            WHERE card_id = v_card_id
+            FOR UPDATE;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE EXCEPTION 'NOT_LISTED:%', v_card_id;
+        END;
 
         IF v_listing.stock < v_qty THEN
             RAISE EXCEPTION 'INSUFFICIENT_STOCK:%:%:%',

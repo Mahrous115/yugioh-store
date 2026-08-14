@@ -8,6 +8,7 @@ have raced.
 The interesting test here is the oversell one: several buyers hitting the last few
 units at the same moment. Sequential checks pass that test by luck, not design.
 """
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -163,6 +164,77 @@ def test_unlisted_card_still_400_not_409(api, make_user):
     user = make_user()
     r = _order(api, user, 999_999_999, 1)
     assert r.status_code == 400, f"expected 400 for an unlisted card, got {r.status_code}"
+
+
+# ── A card with two listings must stop the sale ──────────────────────────────
+
+def test_duplicate_listings_for_one_card_are_refused_not_guessed(api, db, make_user):
+    """Two rows for one card_id must be a 500, not a coin toss between sellers.
+
+    place_order resolves a cart line with SELECT ... INTO STRICT. Non-STRICT, two
+    matching rows would be resolved by taking an arbitrary one: one seller's row
+    locked, their price charged, their stock decremented, their sale recorded, with no
+    signal that a choice happened. STRICT makes it TOO_MANY_ROWS instead, which has no
+    sentinel and so arrives as the flat 500 (migration 004).
+
+    Skipped while listings_card_id_key exists, because the second INSERT cannot
+    succeed. That is the point of the guard rather than a reason to delete the test:
+    dropping that constraint is what multi-seller listings means, and this starts
+    running on the commit that does it.
+    """
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM pg_constraint "
+            "WHERE conrelid = 'public.listings'::regclass AND contype = 'u' "
+            "AND pg_get_constraintdef(oid) ILIKE '%%(card_id)%%'"
+        )
+        if cur.fetchone():
+            pytest.skip(
+                "listings.card_id is still UNIQUE, so a duplicate cannot be created. "
+                "This test arms itself when that constraint is dropped for multi-seller."
+            )
+
+    user = make_user()
+    card_id = 860_000_000 + uuid.uuid4().int % 1_000_000
+    created = []
+    try:
+        for seller in ("Seller A", "Seller B"):
+            r = httpx.post(
+                f"{SUPABASE_URL}/rest/v1/listings",
+                headers={**_service_headers(), "Prefer": "return=representation"},
+                json={
+                    "card_id": card_id,
+                    "card_name": f"PYTEST Duplicate ({seller})",
+                    "card_image": "https://example.invalid/card.jpg",
+                    "price": 4.00,
+                    "stock": 10,
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            created.append(r.json()[0]["id"])
+
+        assert len(created) == 2, "could not create two listings for one card"
+
+        r = _order(api, user, card_id, 1)
+
+        assert r.status_code == 500, (
+            f"an ambiguous card resolved to HTTP {r.status_code} instead of refusing. "
+            "If this is a 201, one seller was chosen arbitrarily and paid."
+        )
+        detail = r.json()["detail"]
+        assert detail == "Could not place order.", (
+            f"the ambiguity was given a client-facing meaning it does not have: {detail!r}"
+        )
+        for marker in ("row", "query", "P0003", "listing", "SELECT", "plpgsql", "{", "}"):
+            assert marker not in detail, f"500 detail leaked {marker!r}: {detail!r}"
+    finally:
+        for listing_id in created:
+            httpx.delete(
+                f"{SUPABASE_URL}/rest/v1/listings?id=eq.{listing_id}",
+                headers=_service_headers(),
+                timeout=30,
+            )
 
 
 def test_server_still_prices_the_order(api, make_user, temp_listing):
