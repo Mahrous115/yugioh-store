@@ -47,14 +47,41 @@ FOREIGN_ORIGINS = [
 ]
 
 
+def _assert_app_answered(response):
+    """Precondition: the app produced this, before concluding anything from what it lacks.
+
+    Starlette's ServerErrorMiddleware sits outside every middleware this app adds, so
+    an unhandled exception is answered with a bare text/plain 500 carrying no CORS
+    headers at all. Every negative assertion in this file -- "not '*'", "not the
+    origin" -- passes trivially against that, because the header it looks for is
+    simply absent.
+
+    Not hypothetical: on 2026-08-14, with an unregistered service key,
+    GET /api/listings/ returned exactly that 500 and seven of these ten tests
+    reported green against a completely dead endpoint.
+
+    5xx is the line. Anything the app answers itself, including its own deliberate
+    500s, travels back out through the middleware stack and carries headers. It is
+    also the only rule that fits preflights: CORSMiddleware short-circuits those
+    before SecurityHeadersMiddleware is reached, so a header-presence check could not
+    be applied uniformly across this file.
+    """
+    assert response.status_code < 500, (
+        f"the API answered HTTP {response.status_code} with no CORS headers "
+        f"({response.text[:80]!r}). Nothing about CORS can be concluded from a "
+        "response the application never produced."
+    )
+
+
 def _acao(api, origin):
     """Access-Control-Allow-Origin returned for a simple GET from `origin`."""
     r = httpx.get(f"{api}/api/listings/", headers={"Origin": origin}, timeout=30)
+    _assert_app_answered(r)
     return r.headers.get("access-control-allow-origin")
 
 
 def _preflight(api, origin, method="POST"):
-    return httpx.options(
+    r = httpx.options(
         f"{api}/api/orders/",
         headers={
             "Origin": origin,
@@ -63,6 +90,8 @@ def _preflight(api, origin, method="POST"):
         },
         timeout=30,
     )
+    _assert_app_answered(r)
+    return r
 
 
 def test_wildcard_origin_is_gone(api):
