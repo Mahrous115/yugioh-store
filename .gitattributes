@@ -1,0 +1,27 @@
+# Line endings, pinned so the Windows clone and the Ubuntu VM clone agree.
+#
+# Without this the two clones relied on each developer's core.autocrlf, which is
+# per-machine config rather than a property of the repository. On Windows that
+# meant every commit printed "LF will be replaced by CRLF", and the working tree
+# held CRLF while the index held LF.
+#
+# text=auto leaves the decision about what counts as text to git's own detection,
+# so it will not touch a file it identifies as binary. eol=lf then checks every
+# text file out with LF on all platforms.
+* text=auto eol=lf
+
+# Files where CRLF is not cosmetic but breaks execution, called out explicitly so
+# the intent survives someone relaxing the blanket rule above.
+#
+#   Dockerfile - a trailing \r is carried into every RUN line's shell command,
+#                and a backslash continuation followed by \r stops continuing.
+#   *.sh       - a \r after the shebang makes the kernel search for an
+#                interpreter whose name ends in a carriage return.
+Dockerfile   text eol=lf
+*.sh         text eol=lf
+
+# No binary files are tracked in this repository today; this was checked rather
+# than assumed, and every tracked file is text. The `text=auto` rule above already
+# defers to git's binary detection, so an image or font committed later is not
+# mangled by default. Add an explicit `*.ext binary` line here only if git's
+# detection ever misclassifies a file it should have left alone.
