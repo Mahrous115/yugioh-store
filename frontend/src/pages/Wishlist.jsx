@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useWishlist } from '../hooks/useWishlist'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Icon from '../components/Icon'
 
 export default function Wishlist() {
   const { items, loading, toggle } = useWishlist()
@@ -13,7 +14,7 @@ export default function Wishlist() {
 
       {items.length === 0 ? (
         <div className="empty-state">
-          <span className="empty-state__icon">♡</span>
+          <Icon name="heart" size={56} className="empty-state__icon" />
           <h2>Your wishlist is empty</h2>
           <p>Click the heart on any card to save it here.</p>
           <Link to="/catalog" className="btn btn--gold">Browse Catalog</Link>

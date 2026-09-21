@@ -1,4 +1,5 @@
 import { useCart } from '../context/CartContext'
+import Icon from './Icon'
 
 /**
  * @param available  units the shop currently has, or null when the card is no
@@ -40,7 +41,7 @@ export default function CartItem({ item, available }) {
           className="qty-btn"
           onClick={() => setQuantity(item.card_id, item.quantity - 1)}
           aria-label="Decrease quantity"
-        >−</button>
+        ><Icon name="minus" size={14} /></button>
         <span className="qty-value">{item.quantity}</span>
         <button
           className="qty-btn"
@@ -49,7 +50,7 @@ export default function CartItem({ item, available }) {
           disabled={atMax}
           title={atMax ? `Only ${available} in stock` : undefined}
           aria-label="Increase quantity"
-        >+</button>
+        ><Icon name="plus" size={14} /></button>
       </div>
 
       <p className="cart-item__subtotal">${(item.price * item.quantity).toFixed(2)}</p>
@@ -58,7 +59,7 @@ export default function CartItem({ item, available }) {
         className="cart-item__remove"
         onClick={() => removeFromCart(item.card_id)}
         aria-label="Remove from cart"
-      >✕</button>
+      ><Icon name="x" size={14} /></button>
     </div>
   )
 }

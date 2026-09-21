@@ -194,6 +194,61 @@ button { cursor: pointer; font-family: inherit; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Icons ──────────────────────────────────────────────────── */
+/* Sized by width/height attributes, not font-size. `block` keeps them off the
+   text baseline so they centre inside flex buttons instead of sitting low. */
+.icon { display: block; flex-shrink: 0; }
+
+/* A heading that leads with an icon. Without this the block-level svg stacks
+   above the text instead of sitting beside it. */
+.heading-with-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+/* ── Add-to-cart feedback ───────────────────────────────────── */
+/* Two signals for one action: the button you clicked confirms it, and the cart
+   badge in the navbar bumps so the change is visible from anywhere on a long
+   catalogue page. */
+@keyframes cart-added {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+@keyframes cart-badge-bump {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.55); }
+  70%  { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+.btn--added {
+  animation: cart-added 0.4s ease;
+  background: var(--success) !important;
+  border-color: var(--success) !important;
+  color: #0a0a0a !important;
+}
+/* The success colour has to survive hover too, or moving the mouse a pixel
+   mid-animation flips the button back to gold and the confirmation is lost. */
+.btn--added:hover:not(:disabled) {
+  background: var(--success) !important;
+  border-color: var(--success) !important;
+  box-shadow: none;
+}
+
+.navbar__badge--bump {
+  animation: cart-badge-bump 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Honour a system-level request for less motion: the colour and label changes
+   still convey the result, so only the movement is dropped. */
+@media (prefers-reduced-motion: reduce) {
+  .btn--added,
+  .navbar__badge--bump { animation: none; }
+}
+
 /* ── Empty state ────────────────────────────────────────────── */
 .empty-state {
   display: flex;
@@ -204,7 +259,7 @@ button { cursor: pointer; font-family: inherit; }
   padding: 80px 20px;
   text-align: center;
 }
-.empty-state__icon { font-size: 56px; }
+.empty-state__icon { color: var(--text-3); }
 .empty-state h2 { font-size: 22px; color: var(--text-1); }
 .empty-state p  { color: var(--text-2); }
 
@@ -229,13 +284,16 @@ button { cursor: pointer; font-family: inherit; }
 }
 
 .navbar__logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 20px;
   font-weight: 800;
   color: var(--gold);
   letter-spacing: -0.02em;
   margin-right: auto;
 }
-.navbar__logo-star { font-size: 18px; }
+.navbar__logo-star { color: var(--gold); }
 .navbar__logo:hover { color: var(--gold-light); }
 
 .navbar__links {
@@ -315,9 +373,7 @@ button { cursor: pointer; font-family: inherit; }
 .hero__decoration {
   position: absolute;
   right: 6%;
-  font-size: 260px;
   color: rgba(201,162,39,0.04);
-  font-weight: 900;
   pointer-events: none;
   user-select: none;
   line-height: 1;
@@ -345,7 +401,7 @@ button { cursor: pointer; font-family: inherit; }
   transition: border-color var(--transition), transform var(--transition);
 }
 .feature:hover { border-color: var(--gold-dark); transform: translateY(-3px); }
-.feature__icon { font-size: 36px; margin-bottom: 12px; }
+.feature__icon { color: var(--gold); margin: 0 auto 12px; }
 .feature h3    { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .feature p     { font-size: 14px; color: var(--text-2); }
 
@@ -612,7 +668,7 @@ button { cursor: pointer; font-family: inherit; }
   padding: 40px;
   text-align: center;
 }
-.confirmation__icon  { font-size: 56px; color: var(--success); margin-bottom: 16px; }
+.confirmation__icon  { color: var(--success); margin: 0 auto 16px; }
 .confirmation__title { font-size: 28px; font-weight: 900; margin-bottom: 8px; }
 .confirmation__sub   { color: var(--text-2); margin-bottom: 24px; }
 .confirmation__meta  { display: flex; justify-content: center; gap: 20px; margin-bottom: 24px; font-size: 13px; color: var(--text-2); }

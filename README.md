@@ -16,7 +16,7 @@
 |---------|-------------|
 | **Card Catalog** | Browse 12 000+ cards from the YGOPRODeck API with search by name and filters by type, attribute, and race |
 | **Card Detail** | Full card stats, description, real market prices (Cardmarket, TCGPlayer), and our custom listing price |
-| **Shopping Cart** | Add/remove cards, adjust quantity — persisted in `localStorage`, checked against live stock |
+| **Shopping Cart** | Add/remove cards, adjust quantity — persisted in `localStorage`, checked against live stock. Adding requires a signed-in user |
 | **Mock Checkout** | One-click order placement (no real payment). Priced and stock-checked server-side, order saved to Supabase |
 | **User Auth** | Sign up, log in, log out via Supabase Auth with email confirmation |
 | **Wishlist** | Authenticated users can save/remove cards; backed by Supabase |
@@ -223,9 +223,9 @@ Whatever you pick:
 
 - **Card data** is never stored locally — the frontend calls the YGOPRODeck API directly from the browser. The backend only manages `listings`, `wishlists`, and `orders`.
 - **Admin listings** are merged client-side: the catalog fetches cards from YGOPRODeck and checks each card ID against the listings held in `ListingsContext`.
-- **Listings are shared and refreshable.** They live in one context rather than being fetched per page, because stock changes when anyone checks out — a purchase refreshes them so every view updates together.
+- **Listings are shared and refreshable.** They live in one context rather than being fetched per page, because stock changes when anyone checks out and listings change when an admin edits them — a purchase or an admin write refreshes that one store, so every view updates together. Pages must not fetch their own private copy: doing so is what previously left a newly created listing showing as "Not listed" in the catalogue until a full page reload.
 - **Auth** uses Supabase's built-in JWT. The frontend passes the session token as a `Bearer` header; the backend validates it via `supabase.auth.get_user(token)` using the service key. Every failure mode returns the same generic 401 — the real cause is logged server-side only.
-- **Cart** is stored in `localStorage` — no auth required to browse and add items. Cart prices are a client-side cache and are **not** trusted at checkout.
+- **Cart** is stored in `localStorage`, but **adding to it requires a signed-in user** — the Add to Cart button sends a guest to `/login` and returns them to the page they came from. Browsing the catalogue is still open to everyone. Cart prices are a client-side cache and are **not** trusted at checkout.
 - **Orders are priced by the server.** `POST /api/orders/` ignores the prices in the request body, looks each `card_id` up in `listings`, and recomputes the total. A client-supplied `total` is only used to detect disagreement, and a mismatch is rejected with 400.
 - **Stock is reserved transactionally.** Pricing, the stock check, the decrement and the insert all happen inside the `place_order` Postgres function, so concurrent buyers cannot oversell the last unit. Over-ordering returns 409; an unlisted card returns 400.
 - **CORS is an allowlist** built from `FRONTEND_URL` plus an anchored pattern for this project's own Vercel preview deploys. `Retry-After` is explicitly exposed so the frontend can read it off a 429.

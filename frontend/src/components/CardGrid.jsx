@@ -1,5 +1,6 @@
 import CardCard from './CardCard'
 import LoadingSpinner from './LoadingSpinner'
+import Icon from './Icon'
 
 /**
  * Responsive grid of CardCard tiles.
@@ -12,7 +13,7 @@ export default function CardGrid({ cards, listingMap = new Map(), loading }) {
   if (!cards.length) {
     return (
       <div className="empty-state">
-        <span className="empty-state__icon">🃏</span>
+        <Icon name="cards" size={56} className="empty-state__icon" />
         <p>No cards found. Try a different search.</p>
       </div>
     )

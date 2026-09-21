@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import Icon from '../components/Icon'
 
 export default function Register() {
   const { signUp }  = useAuth()
@@ -35,7 +36,7 @@ export default function Register() {
     return (
       <div className="auth-page">
         <div className="auth-form auth-form--success">
-          <h2>Check your email ✉️</h2>
+          <h2 className="heading-with-icon"><Icon name="mail" size={22} /> Check your email</h2>
           <p>We sent a confirmation link to <strong>{email}</strong>. Click it to activate your account, then <Link to="/login">log in</Link>.</p>
         </div>
       </div>

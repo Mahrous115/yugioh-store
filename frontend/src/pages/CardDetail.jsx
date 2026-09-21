@@ -1,22 +1,27 @@
-import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import { getCardById } from '../services/ygoprodeck'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { useListings } from '../context/ListingsContext'
 import { useWishlist } from '../hooks/useWishlist'
 import LoadingSpinner from '../components/LoadingSpinner'
+import Icon from '../components/Icon'
 
 export default function CardDetail() {
   const { id }    = useParams()
   const { user }  = useAuth()
   const { addToCart }          = useCart()
   const { isWishlisted, toggle } = useWishlist()
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [card,    setCard]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
   const [added,   setAdded]   = useState(false)
+  const addedTimer = useRef(null)
+  useEffect(() => () => clearTimeout(addedTimer.current), [])
 
   // Read from the shared store rather than fetching a private copy: this page
   // shows stock, and stock now moves when anyone checks out.
@@ -38,6 +43,13 @@ export default function CardDetail() {
   }, [id])
 
   function handleAddToCart() {
+    // The cart is a signed-in feature. Send guests to log in and return them to
+    // this card rather than filling a cart they cannot check out.
+    if (!user) {
+      navigate('/login', { state: { from: location.pathname } })
+      return
+    }
+
     addToCart({
       card_id:    card.id,
       card_name:  card.name,
@@ -45,7 +57,8 @@ export default function CardDetail() {
       price:      listing.price,
     })
     setAdded(true)
-    setTimeout(() => setAdded(false), 2000)
+    clearTimeout(addedTimer.current)
+    addedTimer.current = setTimeout(() => setAdded(false), 2000)
   }
 
   if (loading) return <LoadingSpinner size={60} />
@@ -75,7 +88,8 @@ export default function CardDetail() {
               className={`btn btn--full ${wishlisted ? 'btn--outline' : 'btn--ghost'}`}
               onClick={() => toggle(card)}
             >
-              {wishlisted ? '♥ Remove from Wishlist' : '♡ Add to Wishlist'}
+              <Icon name="heart" size={16} filled={wishlisted} />
+              {wishlisted ? 'Remove from Wishlist' : 'Add to Wishlist'}
             </button>
           )}
         </div>
@@ -120,11 +134,13 @@ export default function CardDetail() {
                 {listing.stock > 0 ? `${listing.stock} in stock` : 'Out of stock'}
               </p>
               <button
-                className="btn btn--gold btn--lg btn--full"
+                className={`btn btn--gold btn--lg btn--full${added ? ' btn--added' : ''}`}
                 onClick={handleAddToCart}
                 disabled={listing.stock === 0}
               >
-                {added ? '✓ Added to Cart!' : 'Add to Cart'}
+                {added
+                  ? <><Icon name="check" size={18} /> Added to Cart</>
+                  : user ? 'Add to Cart' : 'Log in to Buy'}
               </button>
             </div>
           ) : (

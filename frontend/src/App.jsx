@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import AdminRoute from './components/AdminRoute'
+import Icon from './components/Icon'
 
 import Home                 from './pages/Home'
 import Catalog              from './pages/Catalog'
@@ -45,7 +46,7 @@ export default function App() {
           <Route path="*" element={
             <div className="page">
               <div className="empty-state">
-                <span className="empty-state__icon">🃏</span>
+                <Icon name="cards" size={56} className="empty-state__icon" />
                 <h2>Page not found</h2>
               </div>
             </div>

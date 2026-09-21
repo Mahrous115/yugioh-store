@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useListings } from '../context/ListingsContext'
 import { createOrder } from '../services/api'
 import CartItem from '../components/CartItem'
+import Icon from '../components/Icon'
 
 /**
  * Turn a failed checkout into something a shopper can act on.
@@ -106,7 +107,7 @@ export default function Cart() {
     return (
       <div className="page">
         <div className="empty-state">
-          <span className="empty-state__icon">🛒</span>
+          <Icon name="cart" size={56} className="empty-state__icon" />
           <h2>Your cart is empty</h2>
           <p>Browse the catalog and add some cards!</p>
           <Link to="/catalog" className="btn btn--gold">Browse Catalog</Link>

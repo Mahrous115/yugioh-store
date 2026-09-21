@@ -1,4 +1,5 @@
 import { useLocation, Link, Navigate } from 'react-router-dom'
+import Icon from '../components/Icon'
 
 export default function CheckoutConfirmation() {
   const { state } = useLocation()
@@ -14,7 +15,7 @@ export default function CheckoutConfirmation() {
   return (
     <div className="page confirmation">
       <div className="confirmation__card">
-        <div className="confirmation__icon">✓</div>
+        <Icon name="check" size={56} className="confirmation__icon" />
         <h1 className="confirmation__title">Order Confirmed!</h1>
         <p className="confirmation__sub">Thank you for your purchase on Duel Market.</p>
 

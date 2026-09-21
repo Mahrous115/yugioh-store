@@ -1,13 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
+import Icon from './Icon'
 
 export default function Navbar() {
   const { user, profile, isAdmin, signOut } = useAuth()
-  const { itemCount } = useCart()
+  const { itemCount, lastAdded } = useCart()
   const navigate      = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Bump the badge whenever something is added, so the cart visibly reacts even
+  // when the button that was clicked is offscreen. Keyed off the cart's own
+  // "added" stamp rather than a change in itemCount: that would also fire when
+  // the cart rehydrates from localStorage on page load, and would miss nothing
+  // at all if a card were added and removed between renders.
+  const [bump, setBump] = useState(false)
+  useEffect(() => {
+    if (!lastAdded) return
+    setBump(true)
+    const t = setTimeout(() => setBump(false), 500)
+    return () => clearTimeout(t)
+  }, [lastAdded])
 
   async function handleSignOut() {
     await signOut()
@@ -20,7 +34,7 @@ export default function Navbar() {
   return (
     <nav className="navbar">
       <Link to="/" className="navbar__logo" onClick={close}>
-        <span className="navbar__logo-star">★</span> Duel Market
+        <Icon name="star" size={18} className="navbar__logo-star" /> Duel Market
       </Link>
 
       {/* Hamburger (mobile) */}
@@ -37,7 +51,11 @@ export default function Navbar() {
 
         <NavLink to="/cart" className="navbar__link navbar__cart" onClick={close}>
           Cart
-          {itemCount > 0 && <span className="navbar__badge">{itemCount}</span>}
+          {itemCount > 0 && (
+            <span className={`navbar__badge${bump ? ' navbar__badge--bump' : ''}`}>
+              {itemCount}
+            </span>
+          )}
         </NavLink>
 
         {user ? (

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { getListings, createListing, updateListing, deleteListing } from '../services/api'
+import { createListing, updateListing, deleteListing } from '../services/api'
 import { searchCards } from '../services/ygoprodeck'
 import { supabase } from '../services/supabase'
+import { useListings } from '../context/ListingsContext'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 function ChartTooltip({ active, payload, label }) {
@@ -27,9 +28,18 @@ export default function Admin() {
   const [analytics,        setAnalytics]        = useState(null)
   const [loadingAnalytics, setLoadingAnalytics] = useState(true)
 
-  // ── Listings state ────────────────────────────────────────
-  const [listings,    setListings]    = useState([])
-  const [loadingList, setLoadingList] = useState(true)
+  // ── Listings ──────────────────────────────────────────────
+  // Read from the shared store, not a private fetch. Admin used to hold its own
+  // copy and refill only that after a write, so a newly created listing showed
+  // up in this table but the catalogue still rendered the card as "Not listed"
+  // with no stock until the whole page was reloaded.
+  const {
+    listings,
+    loading: loadingList,
+    error:   listingsError,
+    refresh: refreshListings,
+  } = useListings()
+
   const [editingId,   setEditingId]   = useState(null)
   const [editForm,    setEditForm]    = useState({ price: '', stock: '' })
   const [error,       setError]       = useState('')
@@ -44,7 +54,6 @@ export default function Admin() {
   const [newStock,     setNewStock]     = useState('')
   const [adding,       setAdding]       = useState(false)
 
-  useEffect(() => { loadListings() },  [])
   useEffect(() => { loadAnalytics() }, [])
 
   async function loadAnalytics() {
@@ -90,12 +99,6 @@ export default function Admin() {
     }
   }
 
-  async function loadListings() {
-    setLoadingList(true)
-    try { setListings(await getListings()) }
-    finally { setLoadingList(false) }
-  }
-
   // Debounced card search
   useEffect(() => {
     if (!query.trim()) { setSearchRes([]); return }
@@ -129,7 +132,7 @@ export default function Admin() {
       })
       setSuccess(`Listing for "${selectedCard.name}" created.`)
       setSelectedCard(null); setQuery(''); setNewPrice(''); setNewStock('')
-      loadListings()
+      await refreshListings()
     } catch (e) {
       console.error('[Admin] createListing failed:', e)
       setError(e.message || 'Failed to create listing')
@@ -143,7 +146,7 @@ export default function Admin() {
         stock: parseInt(editForm.stock, 10),
       })
       setEditingId(null)
-      loadListings()
+      await refreshListings()
     } catch (e) { setError(e.message) }
   }
 
@@ -151,7 +154,7 @@ export default function Admin() {
     if (!window.confirm(`Delete listing for "${name}"?`)) return
     try {
       await deleteListing(id)
-      loadListings()
+      await refreshListings()
     } catch (e) { setError(e.message) }
   }
 
@@ -161,6 +164,11 @@ export default function Admin() {
 
       {error   && <div className="alert alert--error">{error}</div>}
       {success && <div className="alert alert--success">{success}</div>}
+      {listingsError && (
+        <div className="alert alert--error">
+          Could not load the latest listings ({listingsError}) — the numbers below may be out of date.
+        </div>
+      )}
 
       {/* ── Analytics ─────────────────────────────────────────── */}
       <section className="admin-section">

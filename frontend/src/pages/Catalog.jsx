@@ -3,6 +3,7 @@ import { searchCards, loadDefaultCatalog } from '../services/ygoprodeck'
 import { useListings } from '../context/ListingsContext'
 import FilterBar from '../components/FilterBar'
 import CardGrid from '../components/CardGrid'
+import Icon from '../components/Icon'
 
 const PAGE_SIZE = 20
 
@@ -65,7 +66,7 @@ export default function Catalog() {
             disabled={offset === 0}
             onClick={() => setOffset(o => Math.max(0, o - PAGE_SIZE))}
           >
-            ← Prev
+            <Icon name="arrowLeft" size={14} /> Prev
           </button>
           <span className="pagination__info">Page {currentPage} / {totalPages}</span>
           <button
@@ -73,7 +74,7 @@ export default function Catalog() {
             disabled={offset + PAGE_SIZE >= total || cards.length < PAGE_SIZE}
             onClick={() => setOffset(o => o + PAGE_SIZE)}
           >
-            Next →
+            Next <Icon name="arrowRight" size={14} />
           </button>
         </div>
       )}
